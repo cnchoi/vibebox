@@ -57,6 +57,30 @@ vibebox init --wiki-root "D:\OneDrive\MyVault\VibeBox" --display-template-file t
 
 `init` writes `wikiRoot` into `config.json`; `VIBEBOX_WIKI_ROOT` still wins over it at runtime, which is what a restored store on a second machine needs when its vault path differs.
 
+## Agent attribution in note properties
+
+Every memory note carries an `agent` property recording which agent produced it, resolved from
+`VIBEBOX_AGENT_RUNTIME` / `VIBEBOX_ADAPTER_RUNTIME` / `VIBEBOX_AGENT` at capture time
+(`hermes`, `antigravity`, `codex`, `claude`, …). Memories created before attribution existed
+render `agent: "unknown"` until they are updated.
+
+Attribution is metadata only — it is never indexed as a keyword, tag or domain, so it cannot
+skew retrieval. Filter on it in Obsidian instead:
+
+```text
+TABLE agent, type, scope FROM "40_VibeBox"
+WHERE vibebox = true AND memoryNote = true
+SORT agent ASC
+```
+
+Agent-specific memories:
+
+```text
+LIST FROM "40_VibeBox" WHERE agent = "antigravity"
+```
+
+The same data is in the store as `producerAgent` (memory record) and `source.agent`.
+
 ## What The Wiki Shows
 
 Managed pages show current active guidance:

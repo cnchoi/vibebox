@@ -16,7 +16,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 
-export const VIBEBOX_VERSION = '0.2.0';
+export const VIBEBOX_VERSION = '0.2.1';
 
 const WIKI_DOCS = [
   { docKey: 'home', canonicalFileName: 'Home.md', titleKey: 'homeTitle', fileNameKey: 'homeFileName' },
@@ -2733,9 +2733,11 @@ function normalizeStructuredMemoryCandidate(rawCandidate, context = {}) {
       kind: context.source?.kind || 'agent_candidate',
       id: context.source?.id || null,
       sourceType,
+      agent: currentAgentRuntime(),
       role: 'structuredMemoryCandidate'
     },
     sourceType,
+    producerAgent: currentAgentRuntime(),
     sourceTextKind: 'structuredMemoryCandidate',
     sourcePriority: 1,
     evidence: normalizeCandidateEvidence(raw.evidence || []),
@@ -3234,6 +3236,7 @@ function toMemoryIndexEntry(memory) {
     sourceProjectId: memory.sourceProjectId,
     sourceProjectRoot: memory.sourceProjectRoot,
     repositoryName: memory.repositoryName,
+    producerAgent: memory.producerAgent || '',
     source: memory.source || {},
     evidence: memory.evidence || [],
     confidence: memory.confidence,
@@ -4462,6 +4465,7 @@ function memoryNoteFrontmatter(memory, note, locale = 'en-US') {
     `scope: ${yamlScalar(memory.scope || '')}`,
     `sourceProjectId: ${yamlScalar(memory.sourceProjectId || '')}`,
     `projectId: ${yamlScalar(memory.projectId || '')}`,
+    `agent: ${yamlScalar(memory.producerAgent || 'unknown')}`,
     `domain: ${yamlScalar(domain)}`,
     `category: ${yamlScalar(localizedDocTitle(note.categoryDocKey, locale))}`,
     `primaryCategory: ${yamlScalar(localizedDocTitle(memoryCategoryDocKey(memory), locale))}`,
@@ -5447,6 +5451,17 @@ function hasAgentRuntime() {
     || process.env.VIBEBOX_ADAPTER_RUNTIME
     || process.env.VIBEBOX_AGENT
   );
+}
+
+// Which agent produced this memory (hermes / antigravity / codex / claude / ...).
+// Attribution only: never feed it into retrieval scoring or keyword tokens.
+function currentAgentRuntime() {
+  const raw = process.env.VIBEBOX_AGENT_RUNTIME
+    || process.env.VIBEBOX_ADAPTER_RUNTIME
+    || process.env.VIBEBOX_AGENT
+    || '';
+  const slug = String(raw).trim().toLowerCase().replace(/[^a-z0-9._-]+/gu, '-').replace(/^-+|-+$/gu, '');
+  return slug || 'unknown';
 }
 
 function requireAgentRuntime(commandName) {

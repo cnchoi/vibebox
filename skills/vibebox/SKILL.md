@@ -30,6 +30,15 @@ Pending memory must not be treated as active memory.
 
 ## Strict Recording Gate
 
+Export your runtime marker so Core can attribute the memory to this agent (`agent` property in
+the wiki note, `producerAgent` in the store). Use a stable lowercase name per host:
+
+```bash
+export VIBEBOX_AGENT_RUNTIME=codex      # or claude, antigravity, hermes, ...
+```
+
+Without it, memories are stored as `agent: "unknown"`.
+
 Before creating or submitting any `aftertask` candidate file, run:
 
 ```bash

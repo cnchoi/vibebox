@@ -5277,7 +5277,7 @@ test('universal agent skill package files exist and declare shared skill metadat
     assert.ok(content.trim().length > 0, `${relativePath} should not be empty`);
   }
 
-  const expectedVersion = '0.2.0';
+  const expectedVersion = '0.2.1';
   const packageJson = await loadJson(path.resolve('package.json'));
   const plugin = await loadJson(path.resolve('.codex-plugin/plugin.json'));
   assert.equal(plugin.name, 'vibebox');
@@ -6174,6 +6174,55 @@ test('Step 5 acceptance: init --wiki-root reuses stored localized templates, ign
   assert.match(await readFile(path.join(wikiDir, 'my-own-note.md'), 'utf8'), /hand written/u);
 
   delete process.env.VIBEBOX_WIKI_ROOT;
+});
+
+test('Step 6 acceptance: memory notes record which agent produced them', async () => {
+  const root = await makeWorkspace();
+  await initVibeBox(root);
+
+  const attribute = async (agent, candidateId, topic) => {
+    if (agent) process.env.VIBEBOX_AGENT_RUNTIME = agent;
+    else delete process.env.VIBEBOX_AGENT_RUNTIME;
+    await extractMemoryCandidates(root, {
+      structuredMemoryCandidates: [candidateFixture({
+        id: candidateId,
+        candidateId,
+        memoryRole: 'ai_failure_memory',
+        type: 'agent_failure_pattern',
+        scope: 'project',
+        topic,
+        summary: `Memory captured while testing ${topic}.`,
+        preventionRule: `Avoid repeating ${topic}.`,
+        failureType: 'technical_failure',
+        failedApproach: topic,
+        affectedContext: topic,
+        tags: [topic]
+      })]
+    });
+    const index = await loadJson(storePath(root, 'index', 'global-memory-index.json'));
+    return index.memories.find((memory) => memory.id === candidateId);
+  };
+
+  const hermesMemory = await attribute('hermes', 'agent_hermes', 'mirror-sync');
+  assert.equal(hermesMemory.producerAgent, 'hermes');
+  assert.equal(hermesMemory.source.agent, 'hermes');
+  // attribution must never leak into retrieval tokens
+  assert.ok(!(hermesMemory.tags || []).includes('hermes'), 'agent name must not become a retrieval tag');
+  assert.ok(!(hermesMemory.domains || []).includes('hermes'));
+
+  const unknownMemory = await attribute('', 'agent_unknown', 'josa-index');
+  assert.equal(unknownMemory.producerAgent, 'unknown');
+
+  await rebuildVibeBox(root, { wikiOnly: true });
+  // Memory notes live in category subfolders, so list the tree recursively.
+  const relativeFiles = await readdir(storePath(root, 'wiki'), { recursive: true });
+  const wikiFiles = relativeFiles
+    .filter((entry) => String(entry).endsWith('.md'))
+    .map((entry) => path.join(storePath(root, 'wiki'), String(entry)));
+  const noteTexts = await Promise.all(wikiFiles.map((file) => readFile(file, 'utf8')));
+  assert.ok(noteTexts.some((text) => /^agent: "hermes"$/mu.test(text)), 'rendered note must expose agent: "hermes" in frontmatter');
+  assert.ok(noteTexts.some((text) => /^agent: "unknown"$/mu.test(text)), 'unattributed notes render agent: "unknown"');
+  assert.ok(!noteTexts.some((text) => /^agent: "hermes"$/mu.test(text) && /mirror-sync.*josa-index/u.test(text)));
 });
 
 
