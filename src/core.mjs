@@ -745,11 +745,11 @@ function inspectClaudeSettingsObject(settings, options = {}) {
   const globalStore = userVibeBoxHome(options);
   const isDefaultStore = path.resolve(globalStore) === path.resolve(path.join(options.homeDir || os.homedir(), VIBEBOX_HOME_RELATIVE_PATH));
   const targetDir = isDefaultStore ? CLAUDE_VIBEBOX_DIRECTORY : portablePath(globalStore);
-  const hasDirectory = additionalDirectories.some((value) => pathCandidatesEqual(value, targetDir, options) || pathCandidatesEqual(value, CLAUDE_VIBEBOX_DIRECTORY, options));
+  const hasDirectory = additionalDirectories.some((value) => pathCandidatesEqual(value, targetDir, options));
   const readTarget = isDefaultStore ? '~/.vibebox/**' : `${targetDir}/**`;
   const editTarget = isDefaultStore ? '~/.vibebox/**' : `${targetDir}/**`;
-  const hasReadRule = allow.some((value) => pathCandidatesEqual(String(value).match(/^Read\((.+)\)$/u)?.[1] || '', readTarget, options) || pathCandidatesEqual(String(value).match(/^Read\((.+)\)$/u)?.[1] || '', '~/.vibebox/**', options));
-  const hasEditRule = allow.some((value) => pathCandidatesEqual(String(value).match(/^Edit\((.+)\)$/u)?.[1] || '', editTarget, options) || pathCandidatesEqual(String(value).match(/^Edit\((.+)\)$/u)?.[1] || '', '~/.vibebox/**', options));
+  const hasReadRule = allow.some((value) => pathCandidatesEqual(String(value).match(/^Read\((.+)\)$/u)?.[1] || '', readTarget, options));
+  const hasEditRule = allow.some((value) => pathCandidatesEqual(String(value).match(/^Edit\((.+)\)$/u)?.[1] || '', editTarget, options));
   const bashRules = CLAUDE_VIBEBOX_ALLOW_RULES.filter((rule) => ruleToolName(rule) === 'Bash');
   const presentBashRules = bashRules.filter((rule) => allow.includes(rule));
   return {
