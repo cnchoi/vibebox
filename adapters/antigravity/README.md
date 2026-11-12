@@ -36,9 +36,11 @@ Or via the marketplace catalog manifest at `.agents/plugins/marketplace.json`.
 ## Workflow Integration
 
 1. **Pre-Task Auto-Intervention**:
-   Before initiating meaningful code changes, invoke:
+   Before initiating meaningful code changes, invoke with agent runtime attribution:
    ```bash
-   node "<vibebox-plugin-root>/bin/vibebox.mjs" pretask --task "<current user request>"
+   VIBEBOX_AGENT_RUNTIME=antigravity node "<vibebox-plugin-root>/bin/vibebox.mjs" pretask --task "<current user request>"
+   # Or globally linked:
+   VIBEBOX_AGENT_RUNTIME=antigravity vibebox pretask --task "<current user request>"
    ```
    Apply the retrieved active memory rules and failure avoidance guidance as context for execution.
 
@@ -50,10 +52,11 @@ Or via the marketplace catalog manifest at `.agents/plugins/marketplace.json`.
    Use only contract enums and the configured user language display fields.
 
 3. **After-Task Memory Capture**:
-   Upon task completion:
+   Upon task completion, capture with runtime attribution:
    ```bash
-   node "<vibebox-plugin-root>/bin/vibebox.mjs" aftertask --request "<user request>" --summary "<summary>" --candidates "<candidates json>"
+   VIBEBOX_AGENT_RUNTIME=antigravity node "<vibebox-plugin-root>/bin/vibebox.mjs" aftertask --request "<user request>" --summary "<summary>" --candidates "<candidates json>"
    ```
+   VibeBox automatically records `agent: "antigravity"` in the generated Obsidian markdown note frontmatter.
 
 ## Obsidian Vault Direct Integration
 
