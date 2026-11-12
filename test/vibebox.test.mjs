@@ -5277,7 +5277,7 @@ test('universal agent skill package files exist and declare shared skill metadat
     assert.ok(content.trim().length > 0, `${relativePath} should not be empty`);
   }
 
-  const expectedVersion = '0.2.0-dev';
+  const expectedVersion = '0.2.0';
   const packageJson = await loadJson(path.resolve('package.json'));
   const plugin = await loadJson(path.resolve('.codex-plugin/plugin.json'));
   assert.equal(plugin.name, 'vibebox');
