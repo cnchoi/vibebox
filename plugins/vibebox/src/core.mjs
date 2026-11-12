@@ -742,9 +742,14 @@ function inspectClaudeSettingsObject(settings, options = {}) {
     : {};
   const additionalDirectories = Array.isArray(permissions.additionalDirectories) ? permissions.additionalDirectories : [];
   const allow = Array.isArray(permissions.allow) ? permissions.allow : [];
-  const hasDirectory = additionalDirectories.some((value) => pathCandidatesEqual(value, CLAUDE_VIBEBOX_DIRECTORY, options));
-  const hasReadRule = allow.some((value) => pathCandidatesEqual(String(value).match(/^Read\((.+)\)$/u)?.[1] || '', '~/.vibebox/**', options));
-  const hasEditRule = allow.some((value) => pathCandidatesEqual(String(value).match(/^Edit\((.+)\)$/u)?.[1] || '', '~/.vibebox/**', options));
+  const globalStore = userVibeBoxHome(options);
+  const isDefaultStore = path.resolve(globalStore) === path.resolve(path.join(options.homeDir || os.homedir(), VIBEBOX_HOME_RELATIVE_PATH));
+  const targetDir = isDefaultStore ? CLAUDE_VIBEBOX_DIRECTORY : portablePath(globalStore);
+  const hasDirectory = additionalDirectories.some((value) => pathCandidatesEqual(value, targetDir, options) || pathCandidatesEqual(value, CLAUDE_VIBEBOX_DIRECTORY, options));
+  const readTarget = isDefaultStore ? '~/.vibebox/**' : `${targetDir}/**`;
+  const editTarget = isDefaultStore ? '~/.vibebox/**' : `${targetDir}/**`;
+  const hasReadRule = allow.some((value) => pathCandidatesEqual(String(value).match(/^Read\((.+)\)$/u)?.[1] || '', readTarget, options) || pathCandidatesEqual(String(value).match(/^Read\((.+)\)$/u)?.[1] || '', '~/.vibebox/**', options));
+  const hasEditRule = allow.some((value) => pathCandidatesEqual(String(value).match(/^Edit\((.+)\)$/u)?.[1] || '', editTarget, options) || pathCandidatesEqual(String(value).match(/^Edit\((.+)\)$/u)?.[1] || '', '~/.vibebox/**', options));
   const bashRules = CLAUDE_VIBEBOX_ALLOW_RULES.filter((rule) => ruleToolName(rule) === 'Bash');
   const presentBashRules = bashRules.filter((rule) => allow.includes(rule));
   return {
@@ -777,7 +782,7 @@ export async function inspectClaudeSetup(options = {}) {
       parseError = error.message;
     }
   }
-  const permissions = inspectClaudeSettingsObject(parsed, { homeDir });
+  const permissions = inspectClaudeSettingsObject(parsed, { ...options, homeDir });
   return {
     agent: 'claude',
     globalStore,
@@ -824,6 +829,8 @@ export async function setupCodex(options = {}) {
 export async function setupClaude(options = {}) {
   const homeDir = userHomeDir(options);
   const globalStore = userVibeBoxHome(options);
+  const isDefaultStore = path.resolve(globalStore) === path.resolve(path.join(homeDir, VIBEBOX_HOME_RELATIVE_PATH));
+  const targetDir = isDefaultStore ? CLAUDE_VIBEBOX_DIRECTORY : portablePath(globalStore);
   const settingsPath = userClaudeSettingsPath({ homeDir });
   await ensureDir(globalStore);
   await ensureDir(path.dirname(settingsPath));
@@ -833,13 +840,18 @@ export async function setupClaude(options = {}) {
   const permissions = settings.permissions && typeof settings.permissions === 'object' && !Array.isArray(settings.permissions)
     ? { ...settings.permissions }
     : {};
+  const allowRules = [
+    `Read(${targetDir}/**)`,
+    `Edit(${targetDir}/**)`,
+    ...CLAUDE_VIBEBOX_ALLOW_RULES.filter((rule) => ruleToolName(rule) === 'Bash')
+  ];
   permissions.additionalDirectories = uniqueArray([
     ...(Array.isArray(permissions.additionalDirectories) ? permissions.additionalDirectories : []),
-    CLAUDE_VIBEBOX_DIRECTORY
+    targetDir
   ], (left, right) => pathCandidatesEqual(left, right, { homeDir }));
   permissions.allow = uniqueArray([
     ...(Array.isArray(permissions.allow) ? permissions.allow : []),
-    ...CLAUDE_VIBEBOX_ALLOW_RULES
+    ...allowRules
   ]);
   const updatedSettings = { ...settings, permissions };
   await saveJson(settingsPath, updatedSettings);
@@ -853,7 +865,7 @@ export async function setupClaude(options = {}) {
     backupPath,
     changed: true,
     restartRequired: true,
-    check: await inspectClaudeSetup({ homeDir })
+    check: await inspectClaudeSetup(options)
   };
 }
 
@@ -5811,6 +5823,9 @@ export async function runDoctor(root = process.cwd()) {
   const config = await loadJson(vibeboxPath(root, 'config.json'), defaultConfig()).catch(() => defaultConfig());
   const locale = resolveLocale({}, config);
   const wikiRoot = resolveWikiRoot(root, config);
+  if (config.wikiRoot && !process.env.VIBEBOX_WIKI_ROOT && !(await exists(path.resolve(config.wikiRoot)))) {
+    warnings.push(`Configured wikiRoot path does not exist on disk: ${config.wikiRoot}. Run init --wiki-root <path> or set VIBEBOX_WIKI_ROOT.`);
+  }
   const wikiDocRegistry = await loadJson(vibeboxPath(root, 'registry/wiki-docs.json'), { docs: [] }).catch(() => ({ docs: [] }));
   const registeredWikiPages = (wikiDocRegistry.docs || []).map((doc) => doc.fileName).filter(Boolean);
   const currentProjectId = currentProject?.projectId || detectedProject?.projectId || 'none';

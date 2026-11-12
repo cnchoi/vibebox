@@ -17,6 +17,27 @@ If `VIBEBOX_HOME` is set:
 <VIBEBOX_HOME>/wiki
 ```
 
+### Custom Obsidian Vault Integration (v0.2.0+)
+
+VibeBox can directly render wiki notes into a dedicated subfolder of your personal Obsidian Vault:
+
+```bash
+# During initialization
+vibebox init --wiki-root "D:\OneDrive\MyVault\VibeBox"
+
+# Or via environment variable (takes highest precedence)
+set VIBEBOX_WIKI_ROOT=D:\OneDrive\MyVault\VibeBox
+```
+
+#### Safety Guards
+- **Vault Root Protection**: VibeBox strictly forbids pointing `--wiki-root` directly to an Obsidian vault root (any directory containing `.obsidian`). A dedicated subfolder (such as `<vault>/VibeBox`) is required to prevent accidental corruption or empty folder deletion.
+- **Unmanaged Note Protection**: VibeBox refuses to overwrite existing markdown files that lack `vibebox: true` or managed markers (`<!-- VIBEBOX:BEGIN -->`), protecting human notes.
+- **Deterministic Rebuild (`rebuild --wiki-only`)**: When restoring a store or migrating to a new machine, regenerate the entire wiki tree into your vault with:
+  ```bash
+  vibebox rebuild --wiki-only
+  ```
+  This command runs deterministically from the JSON index without requiring an AI agent runtime.
+
 ## What The Wiki Shows
 
 Managed pages show current active guidance:

@@ -228,8 +228,13 @@ For local source:
 git pull
 npm install
 npm link
+vibebox rebuild --index-only
 vibebox doctor
 ```
+
+> **Notice on Upgrading (v0.2.0+)**:
+> When updating from prior versions, run `vibebox rebuild --index-only` once to refresh `keyword-index.json` with updated CJK tokenization and Korean josa co-indexing.
+> If using an external Obsidian Vault folder (`config.wikiRoot` or `VIBEBOX_WIKI_ROOT`), run `vibebox rebuild --wiki-only` to deterministically regenerate all markdown notes without an AI agent runtime.
 
 For Codex App plugin use:
 
@@ -251,6 +256,8 @@ For Codex App plugin use:
 - [Common Adapter](adapters/common/README.md)
 - [Codex Adapter](adapters/codex/README.md)
 - [Claude Adapter](adapters/claude/README.md)
+- [Antigravity Adapter](adapters/antigravity/README.md)
+- [Hermes Adapter](adapters/hermes/README.md)
 
 ## Privacy
 

@@ -6072,3 +6072,75 @@ test('Step 3 acceptance: deterministic rebuild --wiki-only without agent runtime
   assert.match(cliOutput, /VibeBox rebuild complete.*wiki-only/);
 });
 
+test('Step 4 acceptance: Antigravity/Hermes adapters, dynamic claude permissions, doctor wikiRoot warning', async () => {
+  const root = await makeWorkspace();
+  const dedicatedWiki = path.join(root, 'notes', 'VibeBox');
+  await initVibeBox(root, { wikiRoot: dedicatedWiki });
+
+  // 1. Dynamic portablePath(globalStore) in setupClaude when VIBEBOX_HOME / storeRoot is custom
+  const customStore = path.join(root, 'custom-store');
+  const tempHome = path.join(root, 'fake-home');
+  await mkdir(tempHome, { recursive: true });
+  const prevHome = process.env.VIBEBOX_HOME;
+  try {
+    process.env.VIBEBOX_HOME = customStore;
+    const claudeResult = await setupClaude({ storeRoot: customStore, homeDir: tempHome });
+    assert.equal(claudeResult.globalStore, customStore);
+
+    const claudeSettings = await loadJson(claudeResult.settingsPath);
+    const portableStore = customStore.replace(/\\/gu, '/');
+    assert.ok(
+      claudeSettings.permissions.additionalDirectories.some((dir) => dir.replace(/\\/gu, '/') === portableStore),
+      `additionalDirectories should contain ${portableStore}`
+    );
+    assert.ok(
+      claudeSettings.permissions.allow.some((rule) => rule.includes(portableStore)),
+      `allow rules should contain ${portableStore}`
+    );
+    assert.equal(
+      claudeSettings.permissions.additionalDirectories.includes('~/.vibebox'),
+      false,
+      'additionalDirectories should not use hardcoded ~/.vibebox when custom VIBEBOX_HOME is set'
+    );
+    assert.equal(claudeResult.check.additionalDirectoriesIncludesVibeBox, true);
+    assert.equal(claudeResult.check.allowIncludesReadVibeBox, true);
+    assert.equal(claudeResult.check.allowIncludesEditVibeBox, true);
+  } finally {
+    process.env.VIBEBOX_HOME = prevHome;
+  }
+
+  // 2. Doctor emits warning when config.wikiRoot does not exist on disk
+  const missingRoot = await makeWorkspace();
+  await initVibeBox(missingRoot);
+  const configPath = storePath(missingRoot, 'config.json');
+  const missingWikiDir = path.join(missingRoot, 'non-existent-vault', 'VibeBox');
+  const cfg = await loadJson(configPath);
+  cfg.wikiRoot = missingWikiDir;
+  await writeFile(configPath, JSON.stringify(cfg, null, 2), 'utf8');
+
+  delete process.env.VIBEBOX_WIKI_ROOT;
+  const doctorReport = await runDoctor(missingRoot);
+  assert.ok(
+    doctorReport.warnings.some((w) => w.includes('Configured wikiRoot path does not exist on disk')),
+    `Doctor warnings should report missing wikiRoot: ${JSON.stringify(doctorReport.warnings)}`
+  );
+
+  // 3. Antigravity & Hermes adapter files and documentation exist
+  const antigravityReadme = await readFile(path.resolve('adapters/antigravity/README.md'), 'utf8');
+  assert.match(antigravityReadme, /Antigravity/);
+  assert.match(antigravityReadme, /skills\/vibebox/);
+  assert.match(antigravityReadme, /Role Separation|역할 분담/i);
+
+  const hermesReadme = await readFile(path.resolve('adapters/hermes/README.md'), 'utf8');
+  assert.match(hermesReadme, /Hermes/);
+  assert.match(hermesReadme, /VIBEBOX_AGENT_RUNTIME=hermes/);
+  assert.match(hermesReadme, /Role Separation|역할 분담/i);
+
+  // 4. Upgrade workflow documentation in README.md & adapters/common/INSTALL.md
+  const readme = await readFile(path.resolve('README.md'), 'utf8');
+  assert.match(readme, /vibebox rebuild --index-only/);
+  const installDoc = await readFile(path.resolve('adapters/common/INSTALL.md'), 'utf8');
+  assert.match(installDoc, /vibebox rebuild --index-only/);
+});
+
+

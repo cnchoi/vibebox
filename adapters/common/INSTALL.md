@@ -5,6 +5,21 @@
 - Node.js `>=20`
 - npm
 
+## Update Workflow & Upgrades (v0.2.0+)
+
+When upgrading VibeBox:
+
+```bash
+git pull
+npm install
+npm link
+vibebox rebuild --index-only
+vibebox doctor
+```
+
+- **Rebuild Index**: Run `vibebox rebuild --index-only` once after upgrading to v0.2.0+ to refresh `keyword-index.json` with updated CJK tokenization and Korean josa co-indexing.
+- **Rebuild Wiki**: If using an external Obsidian Vault (`wikiRoot`), run `vibebox rebuild --wiki-only` to deterministically regenerate all markdown notes without an AI agent runtime.
+
 ## Preferred Agent Install
 
 Use an agent plugin, skill package, or hook-enabled adapter when one is available. In normal agent use, the user should not run `pretask`, `schema`, or `aftertask` manually. The installed agent contract or hooks should:
