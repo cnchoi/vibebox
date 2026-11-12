@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   access,
   appendFile,
@@ -424,6 +425,48 @@ export function getProjectNamespacePath(projectId, ...parts) {
   return projectNamespacePath(projectId, ...parts);
 }
 
+export function resolveWikiRoot(root = process.cwd(), config = null) {
+  if (process.env.VIBEBOX_WIKI_ROOT && process.env.VIBEBOX_WIKI_ROOT.trim() !== '') {
+    return path.resolve(process.env.VIBEBOX_WIKI_ROOT.trim());
+  }
+  if (config && typeof config.wikiRoot === 'string' && config.wikiRoot.trim() !== '') {
+    return path.resolve(config.wikiRoot.trim());
+  }
+  try {
+    const configPath = vibeboxPath(root, 'config.json');
+    if (existsSync(configPath)) {
+      const parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+      if (parsed && typeof parsed.wikiRoot === 'string' && parsed.wikiRoot.trim() !== '') {
+        return path.resolve(parsed.wikiRoot.trim());
+      }
+    }
+  } catch {
+    // fallback to store wiki
+  }
+  return vibeboxPath(root, 'wiki');
+}
+
+export async function assertSafeWikiRoot(wikiRoot, options = {}) {
+  const resolved = path.resolve(wikiRoot);
+  const obsidianDir = path.join(resolved, '.obsidian');
+  if (await exists(obsidianDir)) {
+    throw new Error(`Invalid wiki root: "${resolved}" is an Obsidian vault root (contains .obsidian). Specify a dedicated subfolder (e.g. "${path.join(resolved, 'VibeBox')}") to prevent accidental deletion or corruption.`);
+  }
+
+  const defaultWikiRoot = path.resolve(vibeboxPath(options.root || process.cwd(), 'wiki'));
+  const isCustomWikiRoot = resolved !== defaultWikiRoot;
+
+  if (isCustomWikiRoot && (await exists(resolved)) && !options.force) {
+    const mdFiles = await listMarkdownFiles(resolved);
+    for (const file of mdFiles) {
+      const content = await readFile(file, 'utf8').catch(() => '');
+      if (content.trim().length > 0 && !content.includes('vibebox: true') && !content.includes(MANAGED_BEGIN)) {
+        throw new Error(`Target wiki root "${resolved}" contains non-VibeBox markdown file "${path.relative(resolved, file)}". Use a dedicated empty subfolder or specify force: true.`);
+      }
+    }
+  }
+}
+
 export function nowIso() {
   return new Date().toISOString();
 }
@@ -488,7 +531,10 @@ function userVibeBoxHome(options = {}) {
   if (options.storeRoot) {
     return path.resolve(options.storeRoot);
   }
-  if (!options.homeDir && process.env.VIBEBOX_HOME) {
+  if (options.homeDir && options.homeDir !== os.homedir()) {
+    return path.join(path.resolve(options.homeDir), VIBEBOX_HOME_RELATIVE_PATH);
+  }
+  if (process.env.VIBEBOX_HOME) {
     return path.resolve(process.env.VIBEBOX_HOME);
   }
   return path.join(userHomeDir(options), VIBEBOX_HOME_RELATIVE_PATH);
@@ -750,14 +796,14 @@ export async function inspectClaudeSetup(options = {}) {
 
 export async function setupCodex(options = {}) {
   const homeDir = userHomeDir(options);
-  const globalStore = userVibeBoxHome({ homeDir });
+  const globalStore = userVibeBoxHome(options);
   const configPath = userCodexConfigPath({ homeDir });
   await ensureDir(globalStore);
   await ensureDir(path.dirname(configPath));
   const configExisted = await exists(configPath);
   const backupPath = await backupExistingFile(configPath);
   const existingText = configExisted ? await readFile(configPath, 'utf8') : '';
-  const updated = upsertCodexVibeBoxConfig(existingText, { homeDir });
+  const updated = upsertCodexVibeBoxConfig(existingText, options);
   if (!configExisted || updated.changed) {
     await writeFile(configPath, updated.text, 'utf8');
   }
@@ -771,13 +817,13 @@ export async function setupCodex(options = {}) {
     backupPath,
     changed: !configExisted || updated.changed,
     restartRequired: true,
-    check: await inspectCodexSetup({ homeDir })
+    check: await inspectCodexSetup(options)
   };
 }
 
 export async function setupClaude(options = {}) {
   const homeDir = userHomeDir(options);
-  const globalStore = userVibeBoxHome({ homeDir });
+  const globalStore = userVibeBoxHome(options);
   const settingsPath = userClaudeSettingsPath({ homeDir });
   await ensureDir(globalStore);
   await ensureDir(path.dirname(settingsPath));
@@ -991,6 +1037,9 @@ function defaultConfig(options = {}) {
   };
   if (Object.keys(displayTemplates).length > 0) {
     config.displayTemplates = displayTemplates;
+  }
+  if (options.wikiRoot) {
+    config.wikiRoot = path.resolve(options.wikiRoot);
   }
   activateDisplayTemplates(config);
   return config;
@@ -1884,6 +1933,9 @@ export async function initVibeBox(root = process.cwd(), options = {}) {
   const existingConfig = await loadJson(vibeboxPath(root, 'config.json'), {});
   const previousWikiRegistry = await loadJson(vibeboxPath(root, 'registry/wiki-docs.json'), { docs: [] }).catch(() => ({ docs: [] }));
   const configOptions = { ...options };
+  if (options.wikiRoot) {
+    configOptions.wikiRoot = path.resolve(options.wikiRoot);
+  }
   if (Object.keys(existingConfig).length > 0) {
     const existingLocale = configuredMemoryLocale(existingConfig);
     const requestedLocale = configOptions.language || configOptions.locale;
@@ -1902,6 +1954,7 @@ export async function initVibeBox(root = process.cwd(), options = {}) {
     ? {
       ...generatedConfig,
       ...existingConfig,
+      ...(configOptions.wikiRoot ? { wikiRoot: configOptions.wikiRoot } : {}),
       displayTemplates: mergeDisplayTemplates(
         normalizeAgentDisplayTemplates(
           existingConfig.displayTemplates
@@ -1920,18 +1973,29 @@ export async function initVibeBox(root = process.cwd(), options = {}) {
   activateDisplayTemplates(config);
   const memoryLocale = configuredMemoryLocale(config);
 
+  const wikiRoot = resolveWikiRoot(root, config);
+  await assertSafeWikiRoot(wikiRoot, { ...options, root });
+
   await ensureDir(vibeboxPath(root, 'registry'));
   await writeIfMissing(vibeboxPath(root, 'registry/projects.json'), `${JSON.stringify(defaultRegistry(), null, 2)}\n`);
   await writeIfMissing(vibeboxPath(root, 'registry/wiki-docs.json'), `${JSON.stringify(defaultWikiDocRegistry(memoryLocale), null, 2)}\n`);
   const project = await resolveCurrentProjectIdentity(root);
   const hasProject = isRealProjectIdentity(project);
 
-  const dirs = ['', 'global', 'projects', 'wiki', 'wiki/projects', 'index', 'logs', 'pending', 'registry'];
+  const dirs = ['', 'global', 'projects', 'index', 'logs', 'pending', 'registry'];
   if (hasProject) dirs.push(`projects/${project.projectId}`);
   for (const dir of dirs) {
     const dirPath = vibeboxPath(root, dir);
     if (!(await exists(dirPath))) {
       created.push(path.relative(base, dirPath) || '.');
+    }
+    await ensureDir(dirPath);
+  }
+
+  const wikiDirs = [wikiRoot, path.join(wikiRoot, 'projects')];
+  for (const dirPath of wikiDirs) {
+    if (!(await exists(dirPath))) {
+      created.push(isPathInside(dirPath, base) ? path.relative(base, dirPath) || '.' : dirPath);
     }
     await ensureDir(dirPath);
   }
@@ -1956,18 +2020,27 @@ export async function initVibeBox(root = process.cwd(), options = {}) {
       files.push([`projects/${project.projectId}/${fileName}`, `${JSON.stringify(defaultMemoryFile(), null, 2)}\n`]);
     }
   }
-  for (const doc of WIKI_DOCS) {
-    const page = localizedDocFileName(doc.docKey, memoryLocale);
-    files.push([`wiki/${page}`, initialWikiDocPage(doc.docKey, memoryLocale)]);
-  }
-  if (hasProject) {
-    files.push([`wiki/projects/${project.projectId}.md`, initialProjectWikiPage(project, memoryLocale)]);
-  }
 
   for (const [relative, content] of files) {
     const didCreate = await writeIfMissing(vibeboxPath(root, relative), content);
     if (didCreate) {
       created.push(relative);
+    }
+  }
+
+  for (const doc of WIKI_DOCS) {
+    const page = localizedDocFileName(doc.docKey, memoryLocale);
+    const targetPath = path.join(wikiRoot, page);
+    const didCreate = await writeIfMissing(targetPath, initialWikiDocPage(doc.docKey, memoryLocale));
+    if (didCreate) {
+      created.push(isPathInside(targetPath, base) ? path.relative(base, targetPath) : targetPath);
+    }
+  }
+  if (hasProject) {
+    const targetPath = path.join(wikiRoot, 'projects', `${project.projectId}.md`);
+    const didCreate = await writeIfMissing(targetPath, initialProjectWikiPage(project, memoryLocale));
+    if (didCreate) {
+      created.push(isPathInside(targetPath, base) ? path.relative(base, targetPath) : targetPath);
     }
   }
 
@@ -2005,7 +2078,8 @@ async function ensureConfigFields(root) {
   const existing = await loadJson(configPath, {});
   const defaults = await createDefaultConfig({
     locale: existing.locale || existing.memoryLanguage,
-    displayTemplates: existing.displayTemplates
+    displayTemplates: existing.displayTemplates,
+    wikiRoot: existing.wikiRoot
   });
   const merged = { ...defaults, ...existing };
   let changed = false;
@@ -2018,6 +2092,10 @@ async function ensureConfigFields(root) {
       merged[key] = defaults[key];
       changed = true;
     }
+  }
+  if (existing.wikiRoot !== undefined && merged.wikiRoot !== existing.wikiRoot) {
+    merged.wikiRoot = existing.wikiRoot;
+    changed = true;
   }
   const normalizedLocale = normalizeConfigLanguageTag(merged.locale, defaults.locale);
   if (merged.locale !== normalizedLocale) {
@@ -4036,6 +4114,9 @@ async function rebuildWiki(root) {
   const projects = (registry.projects || []).filter(isRegistryProject);
   const notePathMap = buildMemoryNotePathMap(active, locale);
 
+  const wikiRoot = resolveWikiRoot(root, config);
+  await assertSafeWikiRoot(wikiRoot);
+
   await saveJson(vibeboxPath(root, 'registry/wiki-docs.json'), defaultWikiDocRegistry(locale));
   await writeManagedWikiDoc(root, 'home', renderHomeShell(locale), renderHomeManaged(active, locale, notePathMap), locale);
   await writeManagedWikiDoc(
@@ -4070,7 +4151,8 @@ async function writeManagedWikiDoc(root, docKey, shell, managedContent, locale =
 }
 
 async function writeManagedWikiPage(root, pageName, shell, managedContent) {
-  const filePath = vibeboxPath(root, 'wiki', pageName);
+  const wikiRoot = resolveWikiRoot(root);
+  const filePath = path.join(wikiRoot, pageName);
   await ensureDir(path.dirname(filePath));
   const block = managedBlock(managedContent);
   let existing = '';
@@ -4091,6 +4173,9 @@ async function writeManagedWikiPage(root, pageName, shell, managedContent) {
   }
 
   if (existing.trim().length > 0) {
+    if (!existing.includes('vibebox: true') && !existing.includes(MANAGED_BEGIN)) {
+      throw new Error(`Refusing to overwrite non-VibeBox markdown file: ${filePath}. File does not contain "vibebox: true" or managed markers.`);
+    }
     await writeFile(filePath, `${existing.replace(/\s*$/u, '')}\n\n${block}\n`, 'utf8');
     return;
   }
@@ -4343,8 +4428,9 @@ function memoryNoteFrontmatter(memory, note, locale = 'en-US') {
 }
 
 async function cleanupStaleMemoryNotes(root, activeMemoryNotes) {
-  const wikiRoot = vibeboxPath(root, 'wiki');
+  const wikiRoot = resolveWikiRoot(root);
   for (const wikiFile of await listMarkdownFiles(wikiRoot)) {
+    if (!isPathInside(wikiFile, wikiRoot) || path.resolve(wikiFile) === path.resolve(wikiRoot)) continue;
     const relative = path.relative(wikiRoot, wikiFile).replace(/\\/gu, '/');
     const text = await readFile(wikiFile, 'utf8');
     const isMemoryNote = /^---[\s\S]*?\nmemoryNote:\s*true[\s\S]*?---/u.test(text)
@@ -4426,9 +4512,10 @@ function renderMemoryNoteManaged(memory, allMemories, projectById, locale = 'en-
 }
 
 async function cleanupStaleConceptWikiPages(root, locale = 'en-US') {
-  const wikiRoot = vibeboxPath(root, 'wiki');
+  const wikiRoot = resolveWikiRoot(root);
   const managedDocFiles = new Set(currentWikiPages(locale));
   for (const wikiFile of await listMarkdownFiles(wikiRoot)) {
+    if (!isPathInside(wikiFile, wikiRoot) || path.resolve(wikiFile) === path.resolve(wikiRoot)) continue;
     const relative = path.relative(wikiRoot, wikiFile);
     if (relative.includes(path.sep) || relative.includes(path.posix.sep)) continue;
     if (WIKI_PAGES.includes(relative) || managedDocFiles.has(relative)) continue;
@@ -5399,7 +5486,7 @@ function normalizeMemoryLanguage(memory, targetLanguage, locale) {
 }
 
 async function cleanupStaleLocalizedWikiDocs(root, locale, staleDocFiles = []) {
-  const wikiRoot = vibeboxPath(root, 'wiki');
+  const wikiRoot = resolveWikiRoot(root);
   const activeFiles = new Set(currentWikiPages(locale));
   const registry = await loadJson(vibeboxPath(root, 'registry/wiki-docs.json'), { docs: [] }).catch(() => ({ docs: [] }));
   const registryFiles = (registry.docs || []).map((doc) => doc.fileName).filter(Boolean);
@@ -5409,6 +5496,7 @@ async function cleanupStaleLocalizedWikiDocs(root, locale, staleDocFiles = []) {
     ...staleDocFiles
   ]));
   for (const wikiFile of await listMarkdownFiles(wikiRoot)) {
+    if (!isPathInside(wikiFile, wikiRoot) || path.resolve(wikiFile) === path.resolve(wikiRoot)) continue;
     const relative = path.relative(wikiRoot, wikiFile);
     if (relative.includes(path.sep) || relative.includes(path.posix.sep)) continue;
     if (!knownFiles.has(relative) || activeFiles.has(relative)) continue;
@@ -5419,7 +5507,7 @@ async function cleanupStaleLocalizedWikiDocs(root, locale, staleDocFiles = []) {
   }
 }
 
-async function cleanupEmptyWikiDirs(wikiRoot) {
+async function cleanupEmptyWikiDirs(wikiRoot, baseWikiRoot = wikiRoot) {
   let entries = [];
   try {
     entries = await readdir(wikiRoot, { withFileTypes: true });
@@ -5430,11 +5518,14 @@ async function cleanupEmptyWikiDirs(wikiRoot) {
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name === '.obsidian') continue;
     const dirPath = path.join(wikiRoot, entry.name);
-    await cleanupEmptyWikiDirs(dirPath);
+    if (!isPathInside(dirPath, baseWikiRoot) || path.resolve(dirPath) === path.resolve(baseWikiRoot)) continue;
+    await cleanupEmptyWikiDirs(dirPath, baseWikiRoot);
     try {
       const remaining = await readdir(dirPath);
       if (remaining.length === 0) {
-        await rm(dirPath, { recursive: true, force: true });
+        if (path.resolve(dirPath) !== path.resolve(baseWikiRoot)) {
+          await rm(dirPath, { recursive: true, force: true });
+        }
       }
     } catch {
       // Directory disappeared during cleanup.
@@ -5613,6 +5704,20 @@ export async function convertLanguage(root = process.cwd(), options = {}) {
 }
 
 export async function rebuildVibeBox(root = process.cwd(), options = {}) {
+  if (options.wikiOnly) {
+    const configPath = vibeboxPath(root, 'config.json');
+    if (!(await exists(configPath))) {
+      throw new Error(`Cannot rebuild wiki: VibeBox store is not initialized at ${vibeboxPath(root)}.`);
+    }
+    const config = await loadJson(configPath, defaultConfig());
+    const locale = configuredMemoryLocale(config);
+    await saveJson(vibeboxPath(root, 'registry/wiki-docs.json'), defaultWikiDocRegistry(locale));
+    await rebuildWiki(root);
+    if (options.cleanup !== false) {
+      await cleanupStaleLocalizedWikiDocs(root, locale);
+    }
+    return { rebuilt: true, wikiOnly: true, semantic: false, storeRoot: vibeboxPath(root) };
+  }
   const semantic = options.semantic !== false && !options.indexOnly;
   if (semantic) {
     requireAgentRuntime('rebuild');
@@ -5705,6 +5810,7 @@ export async function runDoctor(root = process.cwd()) {
     : null;
   const config = await loadJson(vibeboxPath(root, 'config.json'), defaultConfig()).catch(() => defaultConfig());
   const locale = resolveLocale({}, config);
+  const wikiRoot = resolveWikiRoot(root, config);
   const wikiDocRegistry = await loadJson(vibeboxPath(root, 'registry/wiki-docs.json'), { docs: [] }).catch(() => ({ docs: [] }));
   const registeredWikiPages = (wikiDocRegistry.docs || []).map((doc) => doc.fileName).filter(Boolean);
   const currentProjectId = currentProject?.projectId || detectedProject?.projectId || 'none';
@@ -5712,7 +5818,6 @@ export async function runDoctor(root = process.cwd()) {
     'config.json',
     'registry/projects.json',
     'registry/wiki-docs.json',
-    ...(registeredWikiPages.length > 0 ? registeredWikiPages : currentWikiPages(locale)).map((page) => `wiki/${page}`),
     'index/global-memory-index.json',
     'index/project-index.json',
     'index/keyword-index.json',
@@ -5722,8 +5827,14 @@ export async function runDoctor(root = process.cwd()) {
     'pending/memory-candidates.jsonl'
   ];
   if (!detectedProject?.virtual) {
-    requiredFiles.push(`wiki/projects/${currentProjectId}.md`);
     requiredFiles.push(`projects/${currentProjectId}/project.json`);
+  }
+
+  const requiredWikiFiles = [
+    ...(registeredWikiPages.length > 0 ? registeredWikiPages : currentWikiPages(locale))
+  ];
+  if (!detectedProject?.virtual) {
+    requiredWikiFiles.push(path.join('projects', `${currentProjectId}.md`));
   }
 
   const validProjectIds = new Set();
@@ -5741,7 +5852,7 @@ export async function runDoctor(root = process.cwd()) {
     }
   }
 
-  const projectWikiDir = vibeboxPath(root, 'wiki/projects');
+  const projectWikiDir = path.join(wikiRoot, 'projects');
   try {
     for (const entry of await readdir(projectWikiDir, { withFileTypes: true })) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
@@ -5754,7 +5865,7 @@ export async function runDoctor(root = process.cwd()) {
     // Missing wiki/projects is handled by the required directory check below.
   }
 
-  for (const dir of [base, vibeboxPath(root, 'global'), vibeboxPath(root, 'projects'), vibeboxPath(root, 'wiki'), vibeboxPath(root, 'wiki/projects'), vibeboxPath(root, 'index'), vibeboxPath(root, 'logs'), vibeboxPath(root, 'pending'), vibeboxPath(root, 'registry')]) {
+  for (const dir of [base, vibeboxPath(root, 'global'), vibeboxPath(root, 'projects'), wikiRoot, projectWikiDir, vibeboxPath(root, 'index'), vibeboxPath(root, 'logs'), vibeboxPath(root, 'pending'), vibeboxPath(root, 'registry')]) {
     try {
       const info = await stat(dir);
       if (!info.isDirectory()) errors.push(`Missing directory: ${dir}`);
@@ -5785,6 +5896,14 @@ export async function runDoctor(root = process.cwd()) {
     }
   }
 
+  for (const relative of requiredWikiFiles) {
+    const filePath = path.join(wikiRoot, relative);
+    if (!(await exists(filePath))) {
+      errors.push(`Missing file: wiki/${relative.replace(/\\/gu, '/')}`);
+      continue;
+    }
+  }
+
   try {
     const logs = await readFile(vibeboxPath(root, 'logs/events.jsonl'), 'utf8');
     if (containsSensitive(logs)) {
@@ -5811,7 +5930,7 @@ export async function runDoctor(root = process.cwd()) {
       }
       if (memory.status === 'active') {
         const note = memoryNoteInfo(memory, locale, notePathMap);
-        const notePath = vibeboxPath(root, 'wiki', note.fileName);
+        const notePath = path.join(wikiRoot, note.fileName);
         if (shouldWriteMemoryNote(memory) && !(await exists(notePath))) {
           warnings.push(`Active memory ${memory.id} has no category-based wiki note at ${note.fileName}.`);
         } else if (shouldWriteMemoryNote(memory)) {
@@ -5823,7 +5942,7 @@ export async function runDoctor(root = process.cwd()) {
             warnings.push(`Memory note ${note.fileName} exposes a memory id in its visible title or filename.`);
           }
           const categoryPage = localizedDocFileName(note.categoryDocKey, locale);
-          const categoryPath = vibeboxPath(root, 'wiki', categoryPage);
+          const categoryPath = path.join(wikiRoot, categoryPage);
           if (!(await exists(categoryPath))) {
             warnings.push(`Memory note ${note.fileName} has missing category page ${categoryPage}.`);
           } else {
@@ -5834,7 +5953,7 @@ export async function runDoctor(root = process.cwd()) {
           }
           const sourceProjectId = memory.sourceProjectId || memory.projectId || '';
           if (sourceProjectId && validProjectIds.has(sourceProjectId)) {
-            const projectPath = vibeboxPath(root, 'wiki', 'projects', `${sourceProjectId}.md`);
+            const projectPath = path.join(wikiRoot, 'projects', `${sourceProjectId}.md`);
             if (!(await exists(projectPath))) {
               warnings.push(`Source project page projects/${sourceProjectId}.md is missing for memory ${memory.id}.`);
             } else {
@@ -5848,7 +5967,7 @@ export async function runDoctor(root = process.cwd()) {
           const wikiPage = memory.projectId && !memoryScopeUsesGlobalNamespace(memory)
             ? `projects/${memory.projectId}.md`
             : localizedDocFileName(memory.docKey || docKeyForType(memory.type), locale);
-          if (!wikiPage || !(await exists(vibeboxPath(root, 'wiki', wikiPage)))) {
+          if (!wikiPage || !(await exists(path.join(wikiRoot, wikiPage)))) {
             warnings.push(`Active memory ${memory.id} has no known wiki page.`);
           }
         }
@@ -5910,7 +6029,7 @@ export async function runDoctor(root = process.cwd()) {
       }
     }
 
-    const wikiFiles = await listMarkdownFiles(vibeboxPath(root, 'wiki'));
+    const wikiFiles = await listMarkdownFiles(wikiRoot);
     const wikiFileNames = new Set(wikiFiles.map((file) => path.basename(file, '.md')));
     const activeDocFiles = new Set(registeredWikiPages.length > 0 ? registeredWikiPages : currentWikiPages(locale));
     for (const doc of WIKI_DOCS) {
@@ -5922,7 +6041,7 @@ export async function runDoctor(root = process.cwd()) {
       ].filter(Boolean))];
       const present = [];
       for (const fileName of possibleFiles) {
-        if (await exists(path.join(vibeboxPath(root, 'wiki'), fileName))) {
+        if (await exists(path.join(wikiRoot, fileName))) {
           present.push(fileName);
         }
       }
@@ -5935,7 +6054,7 @@ export async function runDoctor(root = process.cwd()) {
       }
     }
     for (const wikiFile of wikiFiles) {
-      const relativeWikiFile = path.relative(vibeboxPath(root, 'wiki'), wikiFile).replace(/\\/gu, '/');
+      const relativeWikiFile = path.relative(wikiRoot, wikiFile).replace(/\\/gu, '/');
       if (relativeWikiFile.startsWith('memories/')) {
         warnings.push(`Legacy ID-based memory note path remains under wiki/memories: ${relativeWikiFile}.`);
       }
@@ -5960,7 +6079,7 @@ export async function runDoctor(root = process.cwd()) {
         const target = match[1].trim();
         if (!target || target.startsWith('projects/')) continue;
         if (target.includes('/')) {
-          if (!(await exists(path.join(vibeboxPath(root, 'wiki'), `${target}.md`)))) {
+          if (!(await exists(path.join(wikiRoot, `${target}.md`)))) {
             warnings.push(`Wiki link target is missing: ${target}.`);
           }
           continue;
@@ -5979,6 +6098,7 @@ export async function runDoctor(root = process.cwd()) {
     errors,
     warnings,
     storeRoot: base,
+    wikiRoot,
     projectIdentity: detectedProject || null,
     currentProjectId
   };
@@ -5988,6 +6108,7 @@ async function listMarkdownFiles(dirPath) {
   try {
     const entries = await readdir(dirPath, { withFileTypes: true });
     const nested = await Promise.all(entries.map(async (entry) => {
+      if (entry.name === '.obsidian' || entry.name === '.git') return [];
       const fullPath = path.join(dirPath, entry.name);
       if (entry.isDirectory()) return listMarkdownFiles(fullPath);
       return entry.isFile() && entry.name.endsWith('.md') ? [fullPath] : [];

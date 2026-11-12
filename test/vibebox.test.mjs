@@ -18,6 +18,7 @@ import {
   afterTask,
   approveSafeMemories,
   approveMemory,
+  assertSafeWikiRoot,
   backupVibeBox,
   captureEvent,
   classifyCandidateConflict,
@@ -36,6 +37,7 @@ import {
   readJsonl,
   rejectMemory,
   rebuildVibeBox,
+  resolveWikiRoot,
   inspectCodexSetup,
   inspectClaudeSetup,
   setupClaude,
@@ -53,6 +55,7 @@ async function makeWorkspace() {
   process.env.VIBEBOX_HOME = storePath(root);
   process.env.VIBEBOX_LOCALE = 'en-US';
   delete process.env.VIBEBOX_LANGUAGE;
+  delete process.env.VIBEBOX_WIKI_ROOT;
   clearAgentDisplayTemplateEnv();
   await writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'vibebox-test-project' }, null, 2), 'utf8');
   return root;
@@ -5935,5 +5938,137 @@ test('Step 1 acceptance: CJK character preservation, Korean 2-letter tokens, Jos
 
   const brief = await generatePreTaskBrief(root, { task: '권한이 부족한 문제를 해결해줘' });
   assert.match(brief, /권한 설정 실패 방지|권한 검증/u);
+});
+
+test('Step 2 acceptance: Obsidian vault direct integration, safety guards, and wikiRoot resolution', async () => {
+  const root = await makeWorkspace();
+  const vaultDir = path.join(root, 'obsidian-vault');
+  const dotObsidian = path.join(vaultDir, '.obsidian');
+  await mkdir(dotObsidian, { recursive: true });
+
+  // 1. Vault root safety guard: pointing wikiRoot directly to obsidian vault root (.obsidian) throws
+  await assert.rejects(
+    () => initVibeBox(root, { wikiRoot: vaultDir }),
+    /is an Obsidian vault root \(contains \.obsidian\)/
+  );
+  await assert.rejects(
+    () => assertSafeWikiRoot(vaultDir),
+    /is an Obsidian vault root/
+  );
+
+  // 2. Unmanaged markdown files guard: target folder with non-VibeBox .md throws unless force: true
+  const dirtyDir = path.join(root, 'dirty-notes');
+  await mkdir(dirtyDir, { recursive: true });
+  await writeFile(path.join(dirtyDir, 'MyNote.md'), '# Personal note without VibeBox\n', 'utf8');
+  await assert.rejects(
+    () => initVibeBox(root, { wikiRoot: dirtyDir }),
+    /contains non-VibeBox markdown file "MyNote.md"/
+  );
+
+  // force: true bypasses unmanaged file guard
+  const forceResult = await initVibeBox(root, { wikiRoot: dirtyDir, force: true });
+  assert.ok(forceResult);
+
+  // 3. Isolated dedicated subfolder succeeds
+  const cleanRoot = await makeWorkspace();
+  const cleanVault = path.join(cleanRoot, 'cnchoigc-wiki');
+  const cleanDotObsidian = path.join(cleanVault, '.obsidian');
+  const dedicatedWiki = path.join(cleanVault, 'VibeBox');
+  await mkdir(cleanDotObsidian, { recursive: true });
+
+  const initResult = await initVibeBox(cleanRoot, { wikiRoot: dedicatedWiki });
+  assert.ok(initResult);
+
+  // Verify wiki files created in dedicatedWiki (not in vault root, not in ~/.vibebox/wiki)
+  assert.equal(resolveWikiRoot(cleanRoot), dedicatedWiki);
+  const homeContent = await readFile(path.join(dedicatedWiki, 'Home.md'), 'utf8');
+  assert.match(homeContent, /vibebox: true/);
+  assert.match(homeContent, /VibeBox Home/);
+
+  // 4. Priority: VIBEBOX_WIKI_ROOT env overrides config.wikiRoot
+  const envWiki = path.join(cleanVault, 'EnvVibeBox');
+  process.env.VIBEBOX_WIKI_ROOT = envWiki;
+  assert.equal(resolveWikiRoot(cleanRoot), envWiki);
+  delete process.env.VIBEBOX_WIKI_ROOT;
+  assert.equal(resolveWikiRoot(cleanRoot), dedicatedWiki);
+
+  // 5. doctor passes with 0 errors on custom wikiRoot
+  const doctorReport = await runDoctor(cleanRoot);
+  assert.equal(doctorReport.ok, true, `Doctor should be ok: ${JSON.stringify(doctorReport.errors)}`);
+  assert.equal(doctorReport.errors.length, 0);
+  assert.equal(doctorReport.wikiRoot, dedicatedWiki);
+
+  // 6. setupCodex and setupClaude respect VIBEBOX_HOME when set
+  const customVibeBox = path.join(cleanRoot, 'custom-vibebox-store');
+  const previousVibeBoxHome = process.env.VIBEBOX_HOME;
+  try {
+    process.env.VIBEBOX_HOME = customVibeBox;
+    const codexSetup = await setupCodex();
+    assert.equal(codexSetup.globalStore, customVibeBox);
+    const claudeSetup = await setupClaude();
+    assert.equal(claudeSetup.globalStore, customVibeBox);
+  } finally {
+    process.env.VIBEBOX_HOME = previousVibeBoxHome;
+  }
+});
+
+test('Step 3 acceptance: deterministic rebuild --wiki-only without agent runtime', async () => {
+  const root = await makeWorkspace();
+  const vaultDir = path.join(root, 'obsidian-vault');
+  const wikiDir = path.join(vaultDir, 'VibeBox');
+  await initVibeBox(root, { wikiRoot: wikiDir });
+
+  // Add an active memory
+  await extractMemoryCandidates(root, {
+    structuredMemoryCandidates: [
+      candidateFixture({
+        memoryRole: 'ai_failure_memory',
+        type: 'avoid_rule',
+        scope: 'project',
+        topic: '동기화 충돌 방지',
+        rule: '원드라이브 두뇌 동기화 금지',
+        summary: '단일 JSON 동기화 경합 방지',
+        displayTitle: '원드라이브 두뇌 동기화 회피 규칙',
+        displaySummary: '단일 JSON 동기화 경합 방지',
+        displayRule: '원드라이브 두뇌 동기화 금지'
+      })
+    ]
+  });
+
+  // Verify memory note was generated in wikiDir
+  const filesBefore = await readdir(wikiDir);
+  assert.ok(filesBefore.includes('Home.md'));
+
+  // Simulate new PC migration: wipe wikiDir completely, restore brain, then run rebuild --wiki-only
+  await rm(wikiDir, { recursive: true, force: true });
+  assert.equal(await readFile(path.join(wikiDir, 'Home.md'), 'utf8').catch(() => 'missing'), 'missing');
+
+  // Ensure VIBEBOX_AGENT_RUNTIME is NOT set
+  delete process.env.VIBEBOX_AGENT_RUNTIME;
+
+  // Running standard rebuild without --wiki-only or --index-only throws without agent runtime
+  await assert.rejects(
+    () => rebuildVibeBox(root, { semantic: true }),
+    /rebuild requires an AI agent runtime|semantic rebuild requires agent-provided semantic data/
+  );
+
+  // Running rebuild --wiki-only succeeds without agent runtime!
+  const rebuildResult = await rebuildVibeBox(root, { wikiOnly: true });
+  assert.equal(rebuildResult.rebuilt, true);
+  assert.equal(rebuildResult.wikiOnly, true);
+
+  // Wiki files are fully restored deterministically
+  const restoredHome = await readFile(path.join(wikiDir, 'Home.md'), 'utf8');
+  assert.match(restoredHome, /vibebox: true/);
+  assert.match(restoredHome, /VibeBox Home/);
+
+  // Memory note is also regenerated and doctor passes
+  const doctor = await runDoctor(root);
+  assert.equal(doctor.ok, true, `Doctor should be ok after wiki rebuild: ${JSON.stringify(doctor.errors)}`);
+  assert.equal(doctor.errors.length, 0);
+
+  // CLI command test: vibebox rebuild --wiki-only
+  const cliOutput = await runCli(['rebuild', '--wiki-only'], root);
+  assert.match(cliOutput, /VibeBox rebuild complete.*wiki-only/);
 });
 

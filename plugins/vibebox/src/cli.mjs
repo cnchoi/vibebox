@@ -348,10 +348,12 @@ Usage:
   vibebox restore --from <path> --confirm-replace
   vibebox convert-lang <from> <to> [--display-template-file <path>]
   vibebox language convert <from> <to> [--display-template-file <path>]
-  vibebox rebuild [--index-only]
+  vibebox rebuild [--index-only] [--wiki-only]
 
 Global store:
   Defaults to ~/.vibebox and can be overridden with VIBEBOX_HOME or --store <path>.
+  Wiki storage defaults to ~/.vibebox/wiki and can be overridden with VIBEBOX_WIKI_ROOT or --wiki-root <path>.
+  Point --wiki-root to a dedicated subfolder (e.g. your-vault/VibeBox) rather than the Obsidian vault root.
   setup-codex and setup-claude configure agent user settings for the default ~/.vibebox store and ask you to restart the agent after changes.
   Obsidian Wiki display uses the configured canonical BCP 47 memoryLanguage. VIBEBOX_LANGUAGE/--language can seed a new store; VIBEBOX_LOCALE/--locale is an environment hint and does not rewrite an existing store.
   For non-default initial languages, the AI Agent must pass a localized display template with --display-template/--display-template-file or VIBEBOX_DISPLAY_TEMPLATE.
@@ -361,7 +363,7 @@ Global store:
   If userRequest is captured with exactly one candidate, aftertask emits a contract warning unless the AI Agent includes whyOnlyOneCandidate.
   If no reusable memory exists, include a no_reusable_memory_candidate item with noCandidateReason so Core records the diagnostic without active memory.
   Wiki display fields (displayTitle/displaySummary/displayRule/displayLanguage) are required and must use the exact configured user memoryLanguage; Core rejects missing or mismatched display data.
-  Semantic operations convert-lang and rebuild require VIBEBOX_AGENT_RUNTIME from an adapter.
+  Semantic operations convert-lang and default rebuild require VIBEBOX_AGENT_RUNTIME from an adapter. Rebuild with --index-only or --wiki-only runs without an agent runtime.
 `;
 }
 
@@ -380,12 +382,17 @@ export async function runCli(argv = process.argv.slice(2), root = process.cwd())
     }
     process.env.VIBEBOX_LANGUAGE = String(flags.language);
   }
+  if (flags['wiki-root'] || flags.wikiRoot) {
+    process.env.VIBEBOX_WIKI_ROOT = String(flags['wiki-root'] || flags.wikiRoot);
+  }
 
   switch (command) {
     case 'init': {
       const result = await initVibeBox(root, {
         language: flags.language || flags.locale,
-        displayTemplate: await readDisplayTemplateInput(flags)
+        displayTemplate: await readDisplayTemplateInput(flags),
+        wikiRoot: flags['wiki-root'] || flags.wikiRoot,
+        force: Boolean(flags.force)
       });
       const projectId = result.projectId || '(none)';
       return [
@@ -583,14 +590,17 @@ export async function runCli(argv = process.argv.slice(2), root = process.cwd())
     }
 
     case 'rebuild': {
-      const semanticData = await readCandidateInput(flags, '');
+      const isWikiOnly = Boolean(flags['wiki-only']);
+      const isIndexOnly = Boolean(flags['index-only']);
+      const semanticData = (!isWikiOnly && !isIndexOnly) ? await readCandidateInput(flags, '') : '';
       const result = await rebuildVibeBox(root, {
-        indexOnly: Boolean(flags['index-only']),
-        semantic: !flags['index-only'],
+        wikiOnly: isWikiOnly,
+        indexOnly: isIndexOnly,
+        semantic: !isWikiOnly && !isIndexOnly,
         cleanup: flags.cleanup !== false,
         agentSemanticData: flags['semantic-data'] || flags.semanticData || semanticData
       });
-      return `VibeBox rebuild complete. semantic=${result.semantic}`;
+      return `VibeBox rebuild complete. semantic=${result.semantic}${result.wikiOnly ? ' (wiki-only)' : ''}${result.indexOnly ? ' (index-only)' : ''}`;
     }
 
     case undefined:
