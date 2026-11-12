@@ -31,6 +31,8 @@ import {
   formatDoctorReport,
   initVibeBox,
   loadJson,
+  memoryKeywords,
+  normalizeText,
   readJsonl,
   rejectMemory,
   rebuildVibeBox,
@@ -5272,7 +5274,7 @@ test('universal agent skill package files exist and declare shared skill metadat
     assert.ok(content.trim().length > 0, `${relativePath} should not be empty`);
   }
 
-  const expectedVersion = '0.1.13';
+  const expectedVersion = '0.2.0-dev';
   const packageJson = await loadJson(path.resolve('package.json'));
   const plugin = await loadJson(path.resolve('.codex-plugin/plugin.json'));
   assert.equal(plugin.name, 'vibebox');
@@ -5882,3 +5884,56 @@ test('CLI exposes setup, memory, diagnostics, backup, language, and rebuild comm
   assert.match(restore.stdout, /destructive replace/);
   await assertNoLocalStore(root);
 });
+
+test('Step 1 acceptance: CJK character preservation, Korean 2-letter tokens, Josa co-indexing, Chinese 2-gram matching, and English length preservation', async () => {
+  // Criterion 1: normalizeText preserves CJK characters (0 deleted)
+  const cjkInput = '修复 权限 错误';
+  const cjkNormalized = normalizeText(cjkInput);
+  assert.equal(cjkNormalized, '修复 权限 错误');
+
+  // Criterion 2: '권한 에러 수정' yields 3 tokens (2-letter Korean words allowed)
+  const korean2LetterTokens = memoryKeywords({ summary: '권한 에러 수정' });
+  assert.deepEqual(korean2LetterTokens.slice(0, 3), ['권한', '에러', '수정']);
+
+  // Criterion 3: Chinese 2-gram matching
+  const chineseTaskKeywords = memoryKeywords({ summary: '修复权限' });
+  const chineseMemoryKeywords = memoryKeywords({ summary: '权限错误' });
+  assert.ok(chineseTaskKeywords.includes('权限'));
+  assert.ok(chineseMemoryKeywords.includes('权限'));
+
+  // Criterion 4: Korean Josa co-indexing
+  const josaTaskKeywords = memoryKeywords({ summary: '권한이 필요합니다' });
+  assert.ok(josaTaskKeywords.includes('권한이'));
+  assert.ok(josaTaskKeywords.includes('권한'), 'stem "권한" must be co-indexed alongside "권한이"');
+
+  // Safeguard: single-char stem words like '정의', '주의', '회의' are not stripped
+  const safeguardTokens = memoryKeywords({ summary: '정의 주의 회의' });
+  assert.deepEqual(safeguardTokens, ['정의', '주의', '회의']);
+
+  // English words: length >= 3 maintained, 2-letter noise excluded
+  const englishTokens = memoryKeywords({ summary: 'is on at git bug code' });
+  assert.deepEqual(englishTokens, ['git', 'bug', 'code']);
+
+  // End-to-end: Pretask retrieval matches Korean memory with Josa in query
+  const root = await makeWorkspace();
+  await initVibeBox(root);
+  await extractMemoryCandidates(root, {
+    structuredMemoryCandidates: [
+      candidateFixture({
+        memoryRole: 'ai_failure_memory',
+        type: 'avoid_rule',
+        scope: 'project',
+        topic: '권한 검증',
+        rule: '권한 설정 확인 필수',
+        summary: '권한 설정 실패 방지',
+        displayTitle: '권한 검증 규칙',
+        displaySummary: '권한 설정 실패 방지',
+        displayRule: '권한 설정 확인 필수'
+      })
+    ]
+  });
+
+  const brief = await generatePreTaskBrief(root, { task: '권한이 부족한 문제를 해결해줘' });
+  assert.match(brief, /권한 설정 실패 방지|권한 검증/u);
+});
+

@@ -14,7 +14,7 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 
-export const VIBEBOX_VERSION = '0.1.13';
+export const VIBEBOX_VERSION = '0.2.0-dev';
 
 const WIKI_DOCS = [
   { docKey: 'home', canonicalFileName: 'Home.md', titleKey: 'homeTitle', fileNameKey: 'homeFileName' },
@@ -485,6 +485,12 @@ function userHomeDir(options = {}) {
 }
 
 function userVibeBoxHome(options = {}) {
+  if (options.storeRoot) {
+    return path.resolve(options.storeRoot);
+  }
+  if (!options.homeDir && process.env.VIBEBOX_HOME) {
+    return path.resolve(process.env.VIBEBOX_HOME);
+  }
   return path.join(userHomeDir(options), VIBEBOX_HOME_RELATIVE_PATH);
 }
 
@@ -2053,18 +2059,18 @@ async function ensureStoreForRead(root) {
   }
 }
 
-function normalizeText(text) {
+export function normalizeText(text) {
   return String(text ?? '')
     .toLowerCase()
     .replace(/[`"'()[\]{}]/gu, ' ')
-    .replace(/[^a-z0-9가-힣_.#/+:-]+/gu, ' ')
+    .replace(/[^a-z0-9가-힣\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u309F\u30A0-\u30FF\u1100-\u11FF\u3130-\u318F_.#/+:-]+/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim();
 }
 
 function splitStatements(text) {
   return String(text ?? '')
-    .split(/\r?\n|(?<=[.!?])\s+(?=[A-Z가-힣])/u)
+    .split(/\r?\n|(?<=[.!?])\s+(?=[A-Z가-힣\u4E00-\u9FFF])/u)
     .map((statement) => statement.trim())
     .filter(Boolean);
 }
@@ -3716,7 +3722,49 @@ function indexValue(index, value, id) {
   index[key] = [...new Set([...(index[key] || []), id])].sort();
 }
 
-function memoryKeywords(memory) {
+const CJK_CHAR_REGEX = /[\uAC00-\uD7AF\u4E00-\u9FFF\u3400-\u4DBF\u3040-\u309F\u30A0-\u30FF]/u;
+const HANGUL_ONLY_REGEX = /^[\uAC00-\uD7AF]+$/u;
+const HANZI_RUN_REGEX = /[\u4E00-\u9FFF\u3400-\u4DBF]+/gu;
+
+const KOREAN_JOSA_SUFFIXES = [
+  '에서는', '으로는', '에게서', '에게는', '부터는', '까지는',
+  '에서', '으로', '에게', '부터', '까지', '처럼', '하고', '이나', '이란',
+  '은', '는', '이', '가', '을', '를', '에', '의', '로', '와', '과', '도', '만'
+];
+
+function extractKoreanJosaStem(token) {
+  if (!HANGUL_ONLY_REGEX.test(token)) return null;
+  for (const suffix of KOREAN_JOSA_SUFFIXES) {
+    if (token.length > suffix.length && token.endsWith(suffix)) {
+      const stem = token.slice(0, -suffix.length);
+      if (stem.length >= 2) return stem;
+    }
+  }
+  return null;
+}
+
+function extractHanzi2Grams(token) {
+  const grams = [];
+  const runs = token.match(HANZI_RUN_REGEX) || [];
+  for (const run of runs) {
+    if (run.length >= 2) {
+      for (let i = 0; i < run.length - 1; i += 1) {
+        grams.push(run.slice(i, i + 2));
+      }
+    }
+  }
+  return grams;
+}
+
+function isValidKeywordToken(token) {
+  if (!token || STOP_WORDS.has(token)) return false;
+  if (CJK_CHAR_REGEX.test(token)) {
+    return token.length >= 2;
+  }
+  return token.length >= 3;
+}
+
+export function memoryKeywords(memory) {
   const text = [
     memory.type,
     memory.scope,
@@ -3738,14 +3786,43 @@ function memoryKeywords(memory) {
     ...(memory.domains || []),
     ...(memory.appliesTo || [])
   ].join(' ');
-  return normalizeText(text)
+
+  const rawTokens = normalizeText(text)
     .split(/\s+/u)
     .map(normalizeKeywordToken)
-    .filter((token) => token.length >= 3 && !STOP_WORDS.has(token))
-    .slice(0, 60);
+    .filter(isValidKeywordToken);
+
+  const keywords = [];
+  const seen = new Set();
+  function addKeyword(k) {
+    if (k && !seen.has(k) && isValidKeywordToken(k)) {
+      seen.add(k);
+      keywords.push(k);
+    }
+  }
+
+  // 1. Base tokens (preserve existing ordering, up to 60 items)
+  for (const token of rawTokens) {
+    if (keywords.length >= 60) break;
+    addKeyword(token);
+  }
+
+  // 2. Korean Josa co-indexing (append stem if available)
+  for (const token of rawTokens) {
+    const stem = extractKoreanJosaStem(token);
+    if (stem) addKeyword(stem);
+  }
+
+  // 3. Chinese Hanzi 2-grams (append 2-grams so they are not crowded out)
+  for (const token of rawTokens) {
+    const grams = extractHanzi2Grams(token);
+    for (const gram of grams) addKeyword(gram);
+  }
+
+  return keywords.slice(0, 100);
 }
 
-function normalizeKeywordToken(token) {
+export function normalizeKeywordToken(token) {
   const aliases = {
     dependencies: 'dependency',
     deps: 'dependency',
