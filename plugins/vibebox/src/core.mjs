@@ -5,6 +5,7 @@ import {
   appendFile,
   cp,
   mkdir,
+  open,
   readFile,
   readdir,
   rename,
@@ -384,6 +385,14 @@ const SENSITIVE_PATTERNS = [
 const MANAGED_BEGIN = '<!-- VIBEBOX:BEGIN -->';
 const MANAGED_END = '<!-- VIBEBOX:END -->';
 
+// Directories never scanned when validating or cleaning a wiki root. Obsidian metadata,
+// VCS data and dependency trees never contain VibeBox pages and can be huge.
+const SKIPPED_WIKI_SCAN_DIRS = new Set(['.obsidian', '.git', '.trash', 'node_modules', '.stfolder']);
+
+// Marker checks only need the frontmatter/shell at the top of a page, so read a bounded
+// head instead of the whole file. Keeps wiki-root validation cheap on large vaults.
+const WIKI_SAFETY_HEAD_BYTES = 4096;
+
 const CODEX_CONFIG_RELATIVE_PATH = path.join('.codex', 'config.toml');
 const CLAUDE_SETTINGS_RELATIVE_PATH = path.join('.claude', 'settings.json');
 const VIBEBOX_HOME_RELATIVE_PATH = '.vibebox';
@@ -459,9 +468,9 @@ export async function assertSafeWikiRoot(wikiRoot, options = {}) {
   if (isCustomWikiRoot && (await exists(resolved)) && !options.force) {
     const mdFiles = await listMarkdownFiles(resolved);
     for (const file of mdFiles) {
-      const content = await readFile(file, 'utf8').catch(() => '');
-      if (content.trim().length > 0 && !content.includes('vibebox: true') && !content.includes(MANAGED_BEGIN)) {
-        throw new Error(`Target wiki root "${resolved}" contains non-VibeBox markdown file "${path.relative(resolved, file)}". Use a dedicated empty subfolder or specify force: true.`);
+      const head = await readFileHead(file);
+      if (head.trim().length > 0 && !head.includes('vibebox: true') && !head.includes(MANAGED_BEGIN)) {
+        throw new Error(`Target wiki root "${resolved}" contains non-VibeBox markdown file "${path.relative(resolved, file)}". Use a dedicated VibeBox-only subfolder (personal notes must live outside it) or specify force: true.`);
       }
     }
   }
@@ -503,6 +512,20 @@ async function writeIfMissing(filePath, content) {
   await ensureDir(path.dirname(filePath));
   await writeFile(filePath, content, 'utf8');
   return true;
+}
+
+async function readFileHead(filePath, maxBytes = WIKI_SAFETY_HEAD_BYTES) {
+  let handle;
+  try {
+    handle = await open(filePath, 'r');
+    const buffer = Buffer.alloc(maxBytes);
+    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+  }
 }
 
 async function saveJson(filePath, data) {
@@ -1957,8 +1980,20 @@ export async function initVibeBox(root = process.cwd(), options = {}) {
     if (!configOptions.locale && !configOptions.language) {
       configOptions.locale = existingLocale;
     }
-    if (configOptions.displayTemplates === undefined && configOptions.displayTemplate === undefined) {
-      configOptions.displayTemplates = existingConfig.displayTemplates ?? existingConfig.displayTemplate;
+    // Treat undefined, null and blank strings as "not provided": the CLI passes '' when no
+    // --display-template flag is given, and an existing store already carries its localized
+    // template packs, so re-initializing (e.g. init --wiki-root on an existing ko-KR store)
+    // must reuse them instead of failing the requireDisplayTemplate check.
+    const isProvidedTemplate = (value) => value !== undefined
+      && value !== null
+      && (typeof value === 'object' || String(value).trim() !== '');
+    if (!isProvidedTemplate(configOptions.displayTemplates) && !isProvidedTemplate(configOptions.displayTemplate)) {
+      delete configOptions.displayTemplates;
+      delete configOptions.displayTemplate;
+      const reusableTemplates = existingConfig.displayTemplates ?? existingConfig.displayTemplate;
+      if (isProvidedTemplate(reusableTemplates)) {
+        configOptions.displayTemplates = reusableTemplates;
+      }
     }
   }
   const generatedConfig = await createDefaultConfig({ ...configOptions, requireDisplayTemplate: true });
@@ -6123,7 +6158,7 @@ async function listMarkdownFiles(dirPath) {
   try {
     const entries = await readdir(dirPath, { withFileTypes: true });
     const nested = await Promise.all(entries.map(async (entry) => {
-      if (entry.name === '.obsidian' || entry.name === '.git') return [];
+      if (SKIPPED_WIKI_SCAN_DIRS.has(entry.name)) return [];
       const fullPath = path.join(dirPath, entry.name);
       if (entry.isDirectory()) return listMarkdownFiles(fullPath);
       return entry.isFile() && entry.name.endsWith('.md') ? [fullPath] : [];

@@ -6143,4 +6143,37 @@ test('Step 4 acceptance: Antigravity/Hermes adapters, dynamic claude permissions
   assert.match(installDoc, /vibebox rebuild --index-only/);
 });
 
+test('Step 5 acceptance: init --wiki-root reuses stored localized templates, ignores heavy dirs, and still blocks unmanaged notes', async () => {
+  const root = await makeWorkspace();
+  process.env.VIBEBOX_LOCALE = 'ko-KR';
+  setAgentDisplayTemplateEnv('ko-KR', KOREAN_DISPLAY_TEMPLATE_OVERRIDES);
+  await initVibeBox(root);
+  const seededConfig = await loadJson(storePath(root, 'config.json'));
+  assert.ok(seededConfig.displayTemplates?.['ko-KR'], 'store must carry its ko-KR display template pack');
+
+  // Real CLI conditions: no --display-template flag and no template in env.
+  // The CLI passes '' here, which used to defeat template reuse and fail init.
+  clearAgentDisplayTemplateEnv();
+  const wikiDir = path.join(root, 'vault', 'VibeBox');
+  await mkdir(wikiDir, { recursive: true });
+  const output = await runCli(['init', '--wiki-root', wikiDir], root);
+  assert.match(output, /initialized/i);
+  const repointed = await loadJson(storePath(root, 'config.json'));
+  assert.equal(path.resolve(repointed.wikiRoot), path.resolve(wikiDir));
+  const rendered = (await readdir(wikiDir)).filter((name) => name.endsWith('.md'));
+  assert.ok(rendered.length > 0, 'init must render wiki pages into the new vault folder');
+
+  // Dependency/metadata folders are never scanned by the safety guard.
+  await mkdir(path.join(wikiDir, 'node_modules'), { recursive: true });
+  await writeFile(path.join(wikiDir, 'node_modules', 'package-note.md'), '# vendored\n', 'utf8');
+  await assert.doesNotReject(() => rebuildVibeBox(root, { wikiOnly: true }));
+
+  // A human note inside the VibeBox-owned folder still aborts every write.
+  await writeFile(path.join(wikiDir, 'my-own-note.md'), '# personal\n\nhand written\n', 'utf8');
+  await assert.rejects(() => rebuildVibeBox(root, { wikiOnly: true }), /non-VibeBox markdown/u);
+  assert.match(await readFile(path.join(wikiDir, 'my-own-note.md'), 'utf8'), /hand written/u);
+
+  delete process.env.VIBEBOX_WIKI_ROOT;
+});
+
 

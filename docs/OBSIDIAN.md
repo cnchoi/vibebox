@@ -31,12 +31,31 @@ set VIBEBOX_WIKI_ROOT=D:\OneDrive\MyVault\VibeBox
 
 #### Safety Guards
 - **Vault Root Protection**: VibeBox strictly forbids pointing `--wiki-root` directly to an Obsidian vault root (any directory containing `.obsidian`). A dedicated subfolder (such as `<vault>/VibeBox`) is required to prevent accidental corruption or empty folder deletion.
+- **VibeBox-only folder**: the configured folder belongs to VibeBox. Do **not** keep personal notes, daily notes, or attachments inside it. One unmanaged `.md` file there aborts every wiki write and rebuild with `contains non-VibeBox markdown file ...`, because VibeBox refuses to render into a folder it cannot prove it owns. Personal notes belong in a sibling folder of the vault.
 - **Unmanaged Note Protection**: VibeBox refuses to overwrite existing markdown files that lack `vibebox: true` or managed markers (`<!-- VIBEBOX:BEGIN -->`), protecting human notes.
 - **Deterministic Rebuild (`rebuild --wiki-only`)**: When restoring a store or migrating to a new machine, regenerate the entire wiki tree into your vault with:
   ```bash
   vibebox rebuild --wiki-only
   ```
   This command runs deterministically from the JSON index without requiring an AI agent runtime.
+
+#### Re-pointing an existing store at a vault
+
+`init --wiki-root` reuses the display templates already stored in `config.json`, so an existing non-English store can be re-pointed without retyping them:
+
+```bash
+vibebox init --wiki-root "D:\OneDrive\MyVault\VibeBox"
+```
+
+If a store predates stored templates (or you pass a different `--language`), provide them explicitly:
+
+```bash
+# export the packs the store already uses, then hand them back to init
+node -e 'const fs=require("fs"),os=require("os"),p=require("path");const c=JSON.parse(fs.readFileSync(p.join(os.homedir(),".vibebox","config.json"),"utf8"));fs.writeFileSync("tpl.json",JSON.stringify(c.displayTemplates))}'
+vibebox init --wiki-root "D:\OneDrive\MyVault\VibeBox" --display-template-file tpl.json
+```
+
+`init` writes `wikiRoot` into `config.json`; `VIBEBOX_WIKI_ROOT` still wins over it at runtime, which is what a restored store on a second machine needs when its vault path differs.
 
 ## What The Wiki Shows
 
