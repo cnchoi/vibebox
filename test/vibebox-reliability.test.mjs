@@ -320,7 +320,11 @@ test('readJsonl quarantines only the corrupt line', async () => {
 
   const records = await readJsonl(filePath);
   assert.deepEqual(records, [{ id: 'ok' }, { id: 'also-ok' }]);
-  assert.match(await readFile(`${filePath}.corrupt`, 'utf8'), /\{broken/u);
+  await readJsonl(filePath);
+  await readJsonl(filePath);
+  const corrupt = await readFile(`${filePath}.corrupt`, 'utf8');
+  assert.match(corrupt, /\{broken/u);
+  assert.equal(corrupt.trim().split(/\r?\n/u).length, 1);
 });
 
 test('doctor reports quarantined corrupt JSONL lines', async () => {

@@ -988,6 +988,7 @@ export async function readJsonl(filePath) {
         records.push(JSON.parse(line));
       } catch (error) {
         corrupt.push(JSON.stringify({
+          hash: corruptJsonlHash(error.message, line),
           lineNumber: index + 1,
           error: error.message,
           text: line
@@ -995,7 +996,7 @@ export async function readJsonl(filePath) {
       }
     }
     if (corrupt.length > 0) {
-      await appendFile(`${filePath}.corrupt`, `${corrupt.join('\n')}\n`, 'utf8').catch(() => {});
+      await quarantineCorruptJsonl(filePath, corrupt);
     }
     return records;
   } catch (error) {
@@ -1003,6 +1004,57 @@ export async function readJsonl(filePath) {
       return [];
     }
     throw error;
+  }
+}
+
+function corruptJsonlHash(error, text) {
+  return createHash('sha256').update(`${error}\0${text}`).digest('hex');
+}
+
+async function quarantineCorruptJsonl(filePath, records) {
+  const storeRoot = getVibeBoxHome();
+  const appendNewRecords = async () => {
+    const corruptPath = `${filePath}.corrupt`;
+    const existingHashes = new Set();
+    try {
+      const existing = await readFile(corruptPath, 'utf8');
+      for (const line of existing.split(/\r?\n/u)) {
+        if (!line.trim()) continue;
+        try {
+          const record = JSON.parse(line);
+          existingHashes.add(
+            record.hash
+            || corruptJsonlHash(record.error || '', record.text || '')
+          );
+        } catch {
+          // Ignore malformed quarantine metadata and keep appending new records.
+        }
+      }
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+
+    const newRecords = records.filter((line) => {
+      const record = JSON.parse(line);
+      if (existingHashes.has(record.hash)) return false;
+      existingHashes.add(record.hash);
+      return true;
+    });
+    if (newRecords.length > 0) {
+      await appendFile(corruptPath, `${newRecords.join('\n')}\n`, 'utf8');
+    }
+  };
+
+  try {
+    if (isPathInside(filePath, storeRoot)) {
+      await withStoreLock(storeRoot, appendNewRecords, {
+        operation: 'quarantine corrupt JSONL'
+      });
+    } else {
+      await appendNewRecords();
+    }
+  } catch {
+    // Corrupt-line recovery is best effort in read-only or unavailable stores.
   }
 }
 
