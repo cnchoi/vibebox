@@ -21,7 +21,21 @@ To prevent memory pollution and duplication, VibeBox and Hermes maintain strict 
 | **Capture Timing** | `aftertask` with structured candidates upon task completion | Continuous learning, self-improvement review prompts |
 | **Obsidian Output** | Renders into dedicated Obsidian Vault subfolder (`<vault>/VibeBox/`) | Reads or links to Obsidian notes as human-readable context |
 
-## CLI Invocation Pattern
+## Automated Memory Hook (`pre_llm_call`)
+
+Hermes supports the `pre_llm_call` plugin hook to automatically retrieve active VibeBox memory before generating plans or executing tools:
+
+1. Import or invoke `adapters/hermes/vibebox_hermes_hook.py`:
+   ```python
+   from adapters.hermes.vibebox_hermes_hook import pre_llm_call_hook
+
+   # Inside Hermes plugin hook pre_llm_call:
+   def pre_llm_call(prompt, cwd=None):
+       return pre_llm_call_hook(prompt, cwd=cwd)
+   ```
+2. The hook uses the shared VibeBox hook engine with `VIBEBOX_AGENT_RUNTIME=hermes`, applies intent gating to skip casual chat, and returns retrieved active guidance under `{"context": "..."}`.
+
+## Manual CLI Invocation Pattern
 
 Hermes invokes VibeBox using the bundled CLI script relative to the plugin or skill root:
 

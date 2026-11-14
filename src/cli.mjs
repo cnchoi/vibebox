@@ -22,6 +22,7 @@ import {
   resolveStoreMemoryLanguage,
   setupClaude,
   setupCodex,
+  setupAntigravity,
   restoreVibeBox,
   reviewPending,
   runDoctor,
@@ -215,6 +216,26 @@ function yesNo(value) {
 }
 
 function formatSetupResult(result) {
+  if (result.agent === 'antigravity') {
+    return [
+      '[VibeBox Antigravity Setup]',
+      '',
+      `Global store: ${result.globalStore}`,
+      '',
+      `Antigravity hooks: ${result.hooksPath}`,
+      `  Created: ${yesNo(result.hooksCreated)}`,
+      `  Changed: ${yesNo(result.changed)}`,
+      `  Hook script: ${result.scriptPath}`,
+      `  Backup: ${result.backupPath || '(none)'}`,
+      '',
+      'Result:',
+      '  Antigravity lifecycle hooks configured for PreInvocation and Stop.',
+      '',
+      'Next:',
+      '  VibeBox active memory and aftertask checkpoints are now automatically active.'
+    ].join('\n');
+  }
+
   const label = result.agent === 'codex' ? 'Codex' : 'Claude Code';
   const configLabel = result.agent === 'codex' ? 'Codex config' : 'Claude Code settings';
   return [
@@ -331,6 +352,7 @@ Usage:
   vibebox init [--store <path>] [--language <canonical-bcp47>] [--display-template-file <path>]
   vibebox setup-codex
   vibebox setup-claude
+  vibebox setup-antigravity [--hooks-path <path>]
   vibebox capture --request <text> --summary <text> [--command <text>] [--command-result <text>] [--changed-files a,b] [--feedback <text>] [--outcome success|failure|partial|unknown] [--technical-outcome success|failure|partial|unknown] [--user-acceptance accepted|rejected|mixed|unknown]
   vibebox extract --candidates <agent-candidate-json> [--manual-review]
   vibebox review  (debug/manual override only)
@@ -409,6 +431,12 @@ export async function runCli(argv = process.argv.slice(2), root = process.cwd())
 
     case 'setup-claude': {
       return formatSetupResult(await setupClaude());
+    }
+
+    case 'setup-antigravity': {
+      return formatSetupResult(await setupAntigravity({
+        hooksPath: flags['hooks-path'] || flags.hooksPath
+      }));
     }
 
     case 'capture': {

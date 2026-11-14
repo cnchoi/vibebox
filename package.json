@@ -9,7 +9,7 @@
   "scripts": {
     "sync:plugin": "node scripts/sync-plugin-package.mjs",
     "test": "node --test",
-    "check": "node --check bin/vibebox.mjs && node --check src/core.mjs && node --check src/cli.mjs && node --check scripts/claude-vibebox-hook.mjs"
+    "check": "node --check bin/vibebox.mjs && node --check src/core.mjs && node --check src/cli.mjs && node --check scripts/vibebox-hook-core.mjs && node --check scripts/claude-vibebox-hook.mjs && node --check scripts/codex-vibebox-hook.mjs && node --check scripts/antigravity-vibebox-hook.mjs && node --check scripts/hermes-vibebox-hook.mjs"
   },
   "engines": {
     "node": ">=20"

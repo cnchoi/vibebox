@@ -33,7 +33,72 @@ In a project workspace, Antigravity also discovers skills located at:
 
 Or via the marketplace catalog manifest at `.agents/plugins/marketplace.json`.
 
-## Workflow Integration
+## Lifecycle Hooks Integration (Auto-Intervention & After-Task)
+
+Antigravity 2.0 / IDE natively supports automated lifecycle hooks via `hooks.json`.
+Instead of manually typing `pretask` and `aftertask` commands, you can enable fully automated memory retrieval and checkpoints across the IDE, CLI, and Slack bridges.
+
+### 1. Global Installation (Recommended: 1-Command Setup)
+Run the automated setup command to configure global hooks with the resolved script path:
+
+```bash
+vibebox setup-antigravity
+```
+
+This safely creates or merges hooks into `~/.gemini/config/hooks.json` with the absolute path to `antigravity-vibebox-hook.mjs` and backs up any existing configuration:
+
+```json
+{
+  "vibebox": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node \"<vibebox-path>/scripts/antigravity-vibebox-hook.mjs\" PreInvocation",
+        "timeout": 30
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node \"<vibebox-path>/scripts/antigravity-vibebox-hook.mjs\" Stop",
+        "timeout": 30
+      }
+    ]
+  }
+}
+```
+
+You can also specify a custom hooks location with `--hooks-path <path>`.
+
+### 2. Native Plugin & Workspace Project Hooks
+- When installed as an Antigravity plugin (`plugins/vibebox`), `hooks.json` at the plugin root is automatically discovered and executes using relative paths:
+  ```json
+  {
+    "vibebox": {
+      "PreInvocation": [
+        {
+          "type": "command",
+          "command": "node ./scripts/antigravity-vibebox-hook.mjs PreInvocation",
+          "timeout": 30
+        }
+      ],
+      "Stop": [
+        {
+          "type": "command",
+          "command": "node ./scripts/antigravity-vibebox-hook.mjs Stop",
+          "timeout": 30
+        }
+      ]
+    }
+  }
+  ```
+- For workspace-specific hook execution, place `hooks.json` at `.agents/hooks.json`.
+
+### 3. How It Operates
+- **PreInvocation Hook**: Automatically intercepts actionable development tasks (gating out casual chat/greetings), runs `pretask`, and injects relevant memory rules into the model context before planning or code generation.
+- **Stop Hook**: Triggers an aftertask checkpoint prompt with `VIBEBOX_AGENT_RUNTIME=antigravity` guidance when significant work has occurred.
+
+## Manual Workflow Integration
 
 1. **Pre-Task Auto-Intervention**:
    Before initiating meaningful code changes, invoke with agent runtime attribution:

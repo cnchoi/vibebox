@@ -6000,12 +6000,14 @@ test('Step 2 acceptance: Obsidian vault direct integration, safety guards, and w
 
   // 6. setupCodex and setupClaude respect VIBEBOX_HOME when set
   const customVibeBox = path.join(cleanRoot, 'custom-vibebox-store');
+  const setupHome = path.join(cleanRoot, 'fake-home');
+  await mkdir(setupHome, { recursive: true });
   const previousVibeBoxHome = process.env.VIBEBOX_HOME;
   try {
     process.env.VIBEBOX_HOME = customVibeBox;
-    const codexSetup = await setupCodex();
+    const codexSetup = await setupCodex({ homeDir: setupHome, storeRoot: customVibeBox });
     assert.equal(codexSetup.globalStore, customVibeBox);
-    const claudeSetup = await setupClaude();
+    const claudeSetup = await setupClaude({ homeDir: setupHome, storeRoot: customVibeBox });
     assert.equal(claudeSetup.globalStore, customVibeBox);
   } finally {
     process.env.VIBEBOX_HOME = previousVibeBoxHome;

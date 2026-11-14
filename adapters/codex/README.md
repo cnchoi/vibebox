@@ -45,6 +45,18 @@ Then enable the `vibebox` plugin in Codex and start a new session if the host do
 
 Manual edits to Codex marketplace files are for local development or troubleshooting only.
 
+## Codex Lifecycle Hooks & Runtime Attribution
+
+Codex CLI (0.151.0+) automatically discovers and executes hooks defined in `hooks/hooks.json`.
+To ensure Codex memories are attributed correctly to `agent: "codex"` rather than falling back or being lost as `unknown`:
+
+1. **Thin Entrypoint**:
+   VibeBox includes `scripts/codex-vibebox-hook.mjs` which explicitly binds the default agent runtime to `codex`:
+   - Pretask queries are attributed to `codex`.
+   - Stop hook checkpoints instruct Codex to execute aftertask with `VIBEBOX_AGENT_RUNTIME=codex` (or `$env:VIBEBOX_AGENT_RUNTIME="codex"` on Windows).
+2. **Actionable Gating**:
+   Prompts are evaluated before `pretask` is invoked. Non-actionable casual chat, greetings, and brief acknowledgments skip pretask to eliminate token overhead and irrelevant noise.
+
 ## Installed Cache Verification
 
 Codex App can read installed plugin cache files instead of the repository working tree. A GitHub push or local source edit does not automatically refresh that cache.

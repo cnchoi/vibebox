@@ -1,0 +1,18 @@
+{
+  "vibebox": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./scripts/antigravity-vibebox-hook.mjs PreInvocation",
+        "timeout": 30
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./scripts/antigravity-vibebox-hook.mjs Stop",
+        "timeout": 30
+      }
+    ]
+  }
+}

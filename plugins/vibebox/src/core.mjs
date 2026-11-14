@@ -15,6 +15,7 @@ import {
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const VIBEBOX_VERSION = '0.2.1';
 
@@ -889,6 +890,87 @@ export async function setupClaude(options = {}) {
     changed: true,
     restartRequired: true,
     check: await inspectClaudeSetup(options)
+  };
+}
+
+export async function setupAntigravity(options = {}) {
+  const homeDir = userHomeDir(options);
+  const globalStore = userVibeBoxHome(options);
+  const configDir = path.join(homeDir, '.gemini', 'config');
+  const hooksPath = options.hooksPath ? path.resolve(options.hooksPath) : path.join(configDir, 'hooks.json');
+
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  let scriptPath = path.join(repoRoot, 'scripts', 'antigravity-vibebox-hook.mjs');
+  if (!(await exists(scriptPath))) {
+    scriptPath = path.join(repoRoot, 'plugins', 'vibebox', 'scripts', 'antigravity-vibebox-hook.mjs');
+  }
+
+  await ensureDir(globalStore);
+  await ensureDir(path.dirname(hooksPath));
+  const hooksExisted = await exists(hooksPath);
+  const backupPath = await backupExistingFile(hooksPath);
+  const existingHooks = await readJsonObjectIfExists(hooksPath);
+
+  const normalizedScript = portablePath(scriptPath);
+  const hooksDir = path.dirname(hooksPath);
+  let hookCommand = `node "${normalizedScript}"`;
+  let shimPath = null;
+
+  if (process.platform === 'win32') {
+    shimPath = path.join(hooksDir, 'vibebox-hook.cmd');
+    const cmdContent = `@echo off\r\nnode "${normalizedScript}" %*\r\n`;
+    await writeFile(shimPath, cmdContent, 'utf8');
+    hookCommand = 'vibebox-hook.cmd';
+  } else {
+    shimPath = path.join(hooksDir, 'vibebox-hook.sh');
+    const shContent = `#!/bin/sh\nexec node "${normalizedScript}" "$@"\n`;
+    await writeFile(shimPath, shContent, 'utf8');
+    try {
+      const { chmod } = await import('node:fs/promises');
+      await chmod(shimPath, 0o755);
+    } catch {
+      // Ignore chmod on environments that do not support it
+    }
+    hookCommand = './vibebox-hook.sh';
+  }
+
+  const vibeboxHookConfig = {
+    PreInvocation: [
+      {
+        type: 'command',
+        command: `${hookCommand} PreInvocation`,
+        timeout: 30
+      }
+    ],
+    Stop: [
+      {
+        type: 'command',
+        command: `${hookCommand} Stop`,
+        timeout: 30
+      }
+    ]
+  };
+
+  const updatedHooks = {
+    ...existingHooks,
+    vibebox: vibeboxHookConfig
+  };
+
+  await saveJson(hooksPath, updatedHooks);
+
+  return {
+    agent: 'antigravity',
+    homeDir,
+    globalStore,
+    hooksPath,
+    hooksExisted,
+    hooksCreated: !hooksExisted,
+    backupPath,
+    changed: true,
+    scriptPath: normalizedScript,
+    shimPath,
+    hookCommand,
+    restartRequired: false
   };
 }
 
