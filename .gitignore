@@ -23,3 +23,6 @@ Thumbs.db
 .vibebox/
 .agent-context/
 
+__pycache__/
+*.py[cod]
+

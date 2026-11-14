@@ -163,7 +163,7 @@ async function readDisplayTemplateInput(flags = {}) {
     || flags.template
     || flags['locale-template']
     || flags.localeTemplate
-    || '';
+    || undefined;
 }
 
 function isPermissionDeniedError(error) {
@@ -565,6 +565,9 @@ export async function runCli(argv = process.argv.slice(2), root = process.cwd())
       const report = await runDoctor(root);
       const baseReport = formatDoctorReport(report, { locale: flags.locale });
       const setupSections = await formatAgentDoctorSections(flags);
+      if (!report.ok) {
+        process.exitCode = 1;
+      }
       return [baseReport, ...setupSections].join('\n\n');
     }
 
@@ -585,7 +588,8 @@ export async function runCli(argv = process.argv.slice(2), root = process.cwd())
       return [
         `VibeBox store restored from ${result.restoredFrom}`,
         `Store: ${result.storeRoot}`,
-        'Restore used destructive replace, not merge.'
+        'Restore replaced the active store transactionally.',
+        result.rollbackPath ? `Previous store preserved at ${result.rollbackPath}` : 'No previous store existed.'
       ].join('\n');
     }
 

@@ -16,8 +16,9 @@ import {
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { withStoreLock } from './store-lock.mjs';
 
-export const VIBEBOX_VERSION = '0.2.1';
+export const VIBEBOX_VERSION = '0.2.2';
 
 const WIKI_DOCS = [
   { docKey: 'home', canonicalFileName: 'Home.md', titleKey: 'homeTitle', fileNameKey: 'homeFileName' },
@@ -531,7 +532,7 @@ async function readFileHead(filePath, maxBytes = WIKI_SAFETY_HEAD_BYTES) {
 
 async function saveJson(filePath, data) {
   await ensureDir(path.dirname(filePath));
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tmpPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
   await rename(tmpPath, filePath);
 }
@@ -977,10 +978,26 @@ export async function setupAntigravity(options = {}) {
 export async function readJsonl(filePath) {
   try {
     const text = await readFile(filePath, 'utf8');
-    return text
-      .split(/\r?\n/)
-      .filter((line) => line.trim().length > 0)
-      .map((line) => JSON.parse(line));
+    const records = [];
+    const corrupt = [];
+    const lines = text.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      if (!line.trim()) continue;
+      try {
+        records.push(JSON.parse(line));
+      } catch (error) {
+        corrupt.push(JSON.stringify({
+          lineNumber: index + 1,
+          error: error.message,
+          text: line
+        }));
+      }
+    }
+    if (corrupt.length > 0) {
+      await appendFile(`${filePath}.corrupt`, `${corrupt.join('\n')}\n`, 'utf8').catch(() => {});
+    }
+    return records;
   } catch (error) {
     if (error.code === 'ENOENT') {
       return [];
@@ -1837,7 +1854,13 @@ function isRegistryProject(project) {
   );
 }
 
-async function resolveCurrentProjectIdentity(root = process.cwd()) {
+export async function resolveCurrentProjectIdentity(root = process.cwd()) {
+  return withStoreLock(getVibeBoxHome(), () => resolveCurrentProjectIdentityUnlocked(root), {
+    operation: 'resolve project identity'
+  });
+}
+
+async function resolveCurrentProjectIdentityUnlocked(root = process.cwd()) {
   await ensureDir(vibeboxPath(root, 'registry'));
   if (!(await isRecognizedProjectRoot(root))) {
     return virtualProjectIdentity(root);
@@ -1887,8 +1910,6 @@ async function resolveCurrentProjectIdentity(root = process.cwd()) {
   await saveJson(registryPath, registry);
   return project;
 }
-
-export { resolveCurrentProjectIdentity };
 
 async function resolveProjectIdentityForRead(root = process.cwd()) {
   if (!(await isRecognizedProjectRoot(root))) {
@@ -2045,6 +2066,12 @@ function initialProjectWikiPage(project, locale = 'en-US') {
 }
 
 export async function initVibeBox(root = process.cwd(), options = {}) {
+  return withStoreLock(getVibeBoxHome(), () => initVibeBoxUnlocked(root, options), {
+    operation: 'initialize store'
+  });
+}
+
+async function initVibeBoxUnlocked(root = process.cwd(), options = {}) {
   const base = vibeboxPath(root);
   const created = [];
   const existingConfig = await loadJson(vibeboxPath(root, 'config.json'), {});
@@ -2083,6 +2110,7 @@ export async function initVibeBox(root = process.cwd(), options = {}) {
     ? {
       ...generatedConfig,
       ...existingConfig,
+      version: VIBEBOX_VERSION,
       ...(configOptions.wikiRoot ? { wikiRoot: configOptions.wikiRoot } : {}),
       displayTemplates: mergeDisplayTemplates(
         normalizeAgentDisplayTemplates(
@@ -2212,6 +2240,10 @@ async function ensureConfigFields(root) {
   });
   const merged = { ...defaults, ...existing };
   let changed = false;
+  if (existing.version !== VIBEBOX_VERSION) {
+    merged.version = VIBEBOX_VERSION;
+    changed = true;
+  }
 
   const languageKeys = ['memoryLanguage', 'outputLanguage', 'wikiLanguage', 'reportLanguage', 'contextLanguage'];
   const configKeys = ['maxContextItems', 'maxContextChars', 'memoryMode', 'curationMode', 'legacyReviewMode', 'quarantineOnConflict', 'autoActivateConfidence', 'obsidianCompatible', 'locale', ...languageKeys];
@@ -2390,6 +2422,12 @@ function deriveOutcomeFields(input = {}) {
 }
 
 export async function captureEvent(root = process.cwd(), input = {}) {
+  return withStoreLock(getVibeBoxHome(), () => captureEventUnlocked(root, input), {
+    operation: 'capture event'
+  });
+}
+
+async function captureEventUnlocked(root = process.cwd(), input = {}) {
   await initVibeBox(root);
   const project = await resolveCurrentProjectIdentity(root);
   const timestamp = nowIso();
@@ -2915,6 +2953,12 @@ async function activeMemories(root) {
 }
 
 export async function extractMemoryCandidates(root = process.cwd(), input = {}) {
+  return withStoreLock(getVibeBoxHome(), () => extractMemoryCandidatesUnlocked(root, input), {
+    operation: 'extract memory candidates'
+  });
+}
+
+async function extractMemoryCandidatesUnlocked(root = process.cwd(), input = {}) {
   const parsedStructuredCandidates = structuredCandidatesFromInput(input);
   const { realCandidates: structuredCandidates } = splitCandidateDiagnostics(parsedStructuredCandidates, input);
   if (structuredCandidates.length === 0) {
@@ -3407,6 +3451,12 @@ export async function reviewPending(root = process.cwd()) {
 }
 
 export async function approveSafeMemories(root = process.cwd()) {
+  return withStoreLock(getVibeBoxHome(), () => approveSafeMemoriesUnlocked(root), {
+    operation: 'approve safe memories'
+  });
+}
+
+async function approveSafeMemoriesUnlocked(root = process.cwd()) {
   await initVibeBox(root);
   const project = await resolveCurrentProjectIdentity(root);
   const candidates = (await readJsonl(vibeboxPath(root, 'pending/memory-candidates.jsonl')))
@@ -3485,6 +3535,12 @@ function isMemoryVisibleForProject(memory, project = {}) {
 }
 
 export async function approveMemory(root = process.cwd(), candidateId, options = {}) {
+  return withStoreLock(getVibeBoxHome(), () => approveMemoryUnlocked(root, candidateId, options), {
+    operation: 'approve memory'
+  });
+}
+
+async function approveMemoryUnlocked(root = process.cwd(), candidateId, options = {}) {
   await initVibeBox(root);
   const project = await resolveCurrentProjectIdentity(root);
   const records = await readJsonl(vibeboxPath(root, 'pending/memory-candidates.jsonl'));
@@ -3597,6 +3653,12 @@ export async function approveMemory(root = process.cwd(), candidateId, options =
 }
 
 export async function rejectMemory(root = process.cwd(), candidateId, reason = 'Rejected during review.') {
+  return withStoreLock(getVibeBoxHome(), () => rejectMemoryUnlocked(root, candidateId, reason), {
+    operation: 'reject memory'
+  });
+}
+
+async function rejectMemoryUnlocked(root = process.cwd(), candidateId, reason = 'Rejected during review.') {
   await initVibeBox(root);
   const project = await resolveCurrentProjectIdentity(root);
   const records = await readJsonl(vibeboxPath(root, 'pending/memory-candidates.jsonl'));
@@ -4681,7 +4743,7 @@ function conceptDocKey(concept, locale = BASE_MEMORY_LANGUAGE) {
 
 function safeWikiPageName(name) {
   return String(name || 'Concept')
-    .replace(/[<>:"/\\|?*\x00-\x1F]/gu, ' ')
+    .replace(/[<>:"/\\|?*#^\[\]\x00-\x1F]/gu, ' ')
     .replace(/\s+/gu, ' ')
     .trim()
     .slice(0, 80) || 'Concept';
@@ -5565,6 +5627,12 @@ function resolveBackupPath(root, backupPathOrId = '') {
 }
 
 export async function backupVibeBox(root = process.cwd(), options = {}) {
+  return withStoreLock(getVibeBoxHome(), () => backupVibeBoxUnlocked(root, options), {
+    operation: 'backup store'
+  });
+}
+
+async function backupVibeBoxUnlocked(root = process.cwd(), options = {}) {
   await ensureStoreForRead(root);
   const source = vibeboxPath(root);
   const target = resolveBackupPath(root, options.output || options.path || options.label || '');
@@ -5592,6 +5660,37 @@ export async function backupVibeBox(root = process.cwd(), options = {}) {
 }
 
 export async function restoreVibeBox(root = process.cwd(), options = {}) {
+  return withStoreLock(getVibeBoxHome(), () => restoreVibeBoxUnlocked(root, options), {
+    operation: 'restore store',
+    timeoutMs: 20_000
+  });
+}
+
+async function validateRestoredStore(storeRoot, options = {}) {
+  const required = [
+    'config.json',
+    'registry/projects.json',
+    'registry/wiki-docs.json',
+    'index/global-memory-index.json',
+    'index/project-index.json',
+    'index/keyword-index.json',
+    'index/relation-index.json',
+    'index/pending-index.json',
+    'pending/memory-candidates.jsonl'
+  ];
+  if (options.includeLogs !== false) {
+    required.push('logs/events.jsonl');
+  }
+  for (const relative of required) {
+    await access(path.join(storeRoot, relative));
+  }
+  const config = await loadJson(path.join(storeRoot, 'config.json'));
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    throw new Error('Restored store config.json must contain a JSON object.');
+  }
+}
+
+async function restoreVibeBoxUnlocked(root = process.cwd(), options = {}) {
   const source = resolveBackupPath(root, options.from || options.path || options.backup || '');
   if (!source || !(await exists(source))) {
     throw new Error(`Backup not found: ${source}`);
@@ -5604,15 +5703,50 @@ export async function restoreVibeBox(root = process.cwd(), options = {}) {
   if (targetExists && !options.confirmReplace && !options.yes) {
     throw new Error(`Restore is a destructive replace of ${target}. Re-run with --confirm-replace or --yes to delete the existing store before restoring.`);
   }
-  if (targetExists) {
-    await rm(target, { recursive: true, force: true });
+  const parent = path.dirname(target);
+  const staging = path.join(parent, `.${path.basename(target)}.restore-${randomUUID()}`);
+  const rollback = path.join(parent, `.${path.basename(target)}.backup-restore-${timestampLabel()}-${randomUUID().slice(0, 8)}`);
+  const copyStore = options.copyStore || cp;
+  const renameStore = options.renameStore || rename;
+  let movedOriginal = false;
+
+  await ensureDir(parent);
+  await rm(staging, { recursive: true, force: true });
+  try {
+    const manifest = await loadJson(path.join(source, 'backup-manifest.json'), null).catch(() => null);
+    await copyStore(source, staging, {
+      recursive: true,
+      filter: (sourcePath) => path.basename(sourcePath) !== 'backup-manifest.json'
+    });
+    await validateRestoredStore(staging, {
+      includeLogs: manifest?.includeLogs !== false
+    });
+    if (targetExists) {
+      await renameStore(target, rollback);
+      movedOriginal = true;
+    }
+    try {
+      await renameStore(staging, target);
+    } catch (error) {
+      if (movedOriginal) {
+        try {
+          await renameStore(rollback, target);
+          movedOriginal = false;
+        } catch (rollbackError) {
+          throw new Error(`Restore swap failed and rollback also failed: ${error.message}; rollback: ${rollbackError.message}`);
+        }
+      }
+      throw error;
+    }
+    return {
+      restoredFrom: source,
+      storeRoot: target,
+      rollbackPath: movedOriginal ? rollback : null
+    };
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true }).catch(() => {});
+    throw error;
   }
-  await ensureDir(path.dirname(target));
-  await cp(source, target, {
-    recursive: true,
-    filter: (sourcePath) => path.basename(sourcePath) !== 'backup-manifest.json'
-  });
-  return { restoredFrom: source, storeRoot: target };
 }
 
 function normalizeMemoryLanguage(memory, targetLanguage, locale) {
@@ -5801,6 +5935,12 @@ function parseAgentSemanticData(value) {
 }
 
 export async function convertLanguage(root = process.cwd(), options = {}) {
+  return withStoreLock(getVibeBoxHome(), () => convertLanguageUnlocked(root, options), {
+    operation: 'convert language'
+  });
+}
+
+async function convertLanguageUnlocked(root = process.cwd(), options = {}) {
   requireAgentRuntime('convert-lang');
   if (options.from) {
     assertSupportedMemoryLanguageTag(options.from, 'source language');
@@ -5848,6 +5988,13 @@ export async function convertLanguage(root = process.cwd(), options = {}) {
 }
 
 export async function rebuildVibeBox(root = process.cwd(), options = {}) {
+  return withStoreLock(getVibeBoxHome(), () => rebuildVibeBoxUnlocked(root, options), {
+    operation: 'rebuild store',
+    timeoutMs: 20_000
+  });
+}
+
+async function rebuildVibeBoxUnlocked(root = process.cwd(), options = {}) {
   if (options.wikiOnly) {
     const configPath = vibeboxPath(root, 'config.json');
     if (!(await exists(configPath))) {
@@ -6040,6 +6187,12 @@ export async function runDoctor(root = process.cwd()) {
       } catch (error) {
         errors.push(`Invalid JSONL in ${relative}: ${error.message}`);
       }
+    }
+  }
+
+  for (const relative of ['logs', 'pending', 'index']) {
+    for (const corruptFile of await listFilesWithSuffix(vibeboxPath(root, relative), '.corrupt')) {
+      warnings.push(`Store contains quarantined corrupt JSONL lines at ${path.relative(base, corruptFile).replace(/\\/gu, '/')}.`);
     }
   }
 
@@ -6261,6 +6414,26 @@ async function listMarkdownFiles(dirPath) {
       return entry.isFile() && entry.name.endsWith('.md') ? [fullPath] : [];
     }));
     return nested.flat();
+  } catch {
+    return [];
+  }
+}
+
+async function listFilesWithSuffix(dirPath, suffix) {
+  try {
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    const matches = [];
+    for (const entry of entries) {
+      const entryPath = path.join(dirPath, entry.name);
+      if (entry.isDirectory()) {
+        if (!SKIPPED_WIKI_SCAN_DIRS.has(entry.name)) {
+          matches.push(...await listFilesWithSuffix(entryPath, suffix));
+        }
+      } else if (entry.isFile() && entry.name.endsWith(suffix)) {
+        matches.push(entryPath);
+      }
+    }
+    return matches;
   } catch {
     return [];
   }

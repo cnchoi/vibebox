@@ -1,6 +1,6 @@
 {
   "name": "vibebox",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Local-first active user pattern graph and blackbox memory middleware for AI coding agents.",
   "type": "module",
   "bin": {
@@ -8,8 +8,9 @@
   },
   "scripts": {
     "sync:plugin": "node scripts/sync-plugin-package.mjs",
+    "check:plugin": "node scripts/check-plugin-sync.mjs",
     "test": "node --test",
-    "check": "node --check bin/vibebox.mjs && node --check src/core.mjs && node --check src/cli.mjs && node --check scripts/vibebox-hook-core.mjs && node --check scripts/claude-vibebox-hook.mjs && node --check scripts/codex-vibebox-hook.mjs && node --check scripts/antigravity-vibebox-hook.mjs && node --check scripts/hermes-vibebox-hook.mjs"
+    "check": "node --check bin/vibebox.mjs && node --check src/store-lock.mjs && node --check src/core.mjs && node --check src/cli.mjs && node --check scripts/vibebox-hook-core.mjs && node --check scripts/claude-vibebox-hook.mjs && node --check scripts/codex-vibebox-hook.mjs && node --check scripts/antigravity-vibebox-hook.mjs && node --check scripts/hermes-vibebox-hook.mjs && node --check scripts/plugin-package-config.mjs && node --check scripts/check-plugin-sync.mjs && node scripts/check-plugin-sync.mjs"
   },
   "engines": {
     "node": ">=20"

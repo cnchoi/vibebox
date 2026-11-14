@@ -158,7 +158,7 @@ Codex App can read an installed plugin cache instead of your local checkout. A G
 Example cache placeholder:
 
 ```text
-%USERPROFILE%\.codex\plugins\cache\boksajang\vibebox\0.1.13\
+%USERPROFILE%\.codex\plugins\cache\boksajang\vibebox\0.2.2\
 ```
 
 VibeBox does not delete or rewrite Codex App plugin cache files automatically.
@@ -228,9 +228,21 @@ For local source:
 git pull
 npm install
 npm link
+npm run sync:plugin
+npm run check
 vibebox rebuild --index-only
 vibebox doctor
 ```
+
+## Store Concurrency And Recovery
+
+VibeBox serializes mutating commands across processes with a lock file placed beside the global store, such as `%USERPROFILE%\.vibebox.lock`. Initialization, capture, approval, rejection, language conversion, rebuild, backup, and restore use the same lock. Nested calls reuse the active transaction instead of taking the lock again.
+
+The lock uses a bounded retry loop, heartbeat timestamps, and stale-owner recovery. Read-only retrieval does not create a workspace-local store. If another process is writing for longer than the configured timeout, the command fails with a lock diagnostic rather than risking a lost update.
+
+`restore --confirm-replace` copies and validates the backup in a sibling staging directory before moving the active store. If the final swap fails, the original store is moved back. Successful restores retain a `.backup-restore-*` rollback directory next to the store.
+
+Malformed JSONL lines are quarantined in a sibling `*.corrupt` file while valid records remain readable. `vibebox doctor` reports these files so they can be reviewed instead of silently ignored.
 
 > **Notice on Upgrading (v0.2.0+)**:
 > When updating from prior versions, run `vibebox rebuild --index-only` once to refresh `keyword-index.json` with updated CJK tokenization and Korean josa co-indexing.
