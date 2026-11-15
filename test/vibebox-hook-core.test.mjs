@@ -224,13 +224,30 @@ test('Antigravity PreInvocation hook deduplicates using (prompt, initialNumSteps
   const secondPayload = JSON.parse(secondRun.stdout);
   assert.deepEqual(secondPayload.injectSteps, []);
 
-  // 4. Turn 2 with same prompt but different initialNumSteps (new turn in conversation) -> INJECTS!
-  const turnTwoRun = spawnSync(process.execPath, [hookPath, 'PreInvocation'], {
+  // 4. Mid-run step with the SAME prompt but higher initialNumSteps -> still no injection.
+  //    (Injecting again mid tool-loop made the engine end the turn without a final answer.)
+  const midRunSamePrompt = spawnSync(process.execPath, [hookPath, 'PreInvocation'], {
     input: JSON.stringify({
       lastUserInput: '함수 리팩토링 및 테스트 코드 작성',
       conversationId: convoId,
       initialNumSteps: 5,
       invocationNum: 3,
+      workspacePaths: [process.cwd()]
+    }),
+    encoding: 'utf8',
+    env
+  });
+
+  assert.equal(midRunSamePrompt.status, 0);
+  assert.deepEqual(JSON.parse(midRunSamePrompt.stdout).injectSteps, []);
+
+  // 5. A genuinely new user turn (different prompt) -> INJECTS again.
+  const turnTwoRun = spawnSync(process.execPath, [hookPath, 'PreInvocation'], {
+    input: JSON.stringify({
+      lastUserInput: '테스트 코드 리팩토링 및 버그 수정',
+      conversationId: convoId,
+      initialNumSteps: 0,
+      invocationNum: 4,
       workspacePaths: [process.cwd()]
     }),
     encoding: 'utf8',
@@ -250,13 +267,16 @@ test('Antigravity Stop hook outputs decision: continue and reason per engine spe
     CLAUDE_PLUGIN_ROOT: path.resolve('.')
   };
 
+  // dedupe 상태가 임시 폴더에 conversationId 키로 남으므로 실행마다 유니크해야 한다
+  const stopConvoId = `test-convo-stop-${process.pid}-${Date.now()}`;
+
   // Actionable Stop hook -> decision continue + guidance
   const stopRun = spawnSync(process.execPath, [hookPath, 'Stop'], {
     input: JSON.stringify({
       terminationReason: 'NO_TOOL_CALL',
       executionNum: 1,
       lastUserInput: '함수 리팩토링 해줘',
-      conversationId: 'test-convo-stop',
+      conversationId: stopConvoId,
       workspacePaths: [process.cwd()]
     }),
     encoding: 'utf8',
@@ -275,7 +295,7 @@ test('Antigravity Stop hook outputs decision: continue and reason per engine spe
       terminationReason: 'NO_TOOL_CALL',
       executionNum: 2,
       lastUserInput: '함수 리팩토링 해줘',
-      conversationId: 'test-convo-stop',
+      conversationId: stopConvoId,
       workspacePaths: [process.cwd()]
     }),
     encoding: 'utf8',
@@ -285,6 +305,11 @@ test('Antigravity Stop hook outputs decision: continue and reason per engine spe
   assert.equal(secondStopRun.status, 0);
   const secondStopPayload = JSON.parse(secondStopRun.stdout);
   assert.deepEqual(secondStopPayload, {});
+  // 같은 상태 파일이 다음 실행에 영향을 주지 않도록 정리
+  for (const prefix of ['vibebox_agy_stop_', 'vibebox_agy_dedupe_']) {
+    rmSync(path.join(tmpdir(), `${prefix}${stopConvoId}.json`), { force: true });
+  }
+
 });
 
 test('Hermes hook entrypoint outputs guidance attributed to hermes', async () => {

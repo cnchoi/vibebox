@@ -187,7 +187,10 @@ function shouldSkipAntigravityPreInvocation(input, prompt) {
   try {
     if (existsSync(dedupeFile)) {
       const data = JSON.parse(readFileSync(dedupeFile, 'utf8'));
-      if (data.lastPrompt === prompt && data.lastInitialSteps === initialSteps) {
+      // 같은 사용자 프롬프트에는 한 번만 주입한다. (prompt, initialNumSteps)로 비교하면
+      // 툴 호출 루프에서 initialNumSteps가 계속 바뀌어 실행 중간에 다시 주입되고,
+      // 엔진이 그 주입을 새 턴으로 처리해 최종 답변 없이 멈춘다(2026-11-15 15:56 사례).
+      if (data.lastPrompt === prompt) {
         return true;
       }
     }
