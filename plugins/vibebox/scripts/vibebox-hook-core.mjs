@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -197,6 +197,32 @@ function shouldSkipAntigravityPreInvocation(input, prompt) {
       timestamp: Date.now()
     }), 'utf8');
     pruneStaleDedupeFiles(DEDUPE_FILE_PREFIX, DEDUPE_MAX_AGE_MS);
+  } catch {
+    // Ignore cache access issues gracefully
+  }
+  return false;
+}
+
+const STOP_DEDUPE_FILE_PREFIX = 'vibebox_agy_stop_';
+
+function shouldSkipAntigravityStop(input, prompt) {
+  if (!input.conversationId) {
+    return false;
+  }
+  const safeId = String(input.conversationId).replace(/[^a-zA-Z0-9_-]/g, '');
+  const dedupeFile = resolve(tmpdir(), `${STOP_DEDUPE_FILE_PREFIX}${safeId}.json`);
+  try {
+    if (existsSync(dedupeFile)) {
+      const data = JSON.parse(readFileSync(dedupeFile, 'utf8'));
+      if (data.lastPrompt === prompt) {
+        return true;
+      }
+    }
+    writeFileSync(dedupeFile, JSON.stringify({
+      lastPrompt: prompt,
+      timestamp: Date.now()
+    }), 'utf8');
+    pruneStaleDedupeFiles(STOP_DEDUPE_FILE_PREFIX, DEDUPE_MAX_AGE_MS);
   } catch {
     // Ignore cache access issues gracefully
   }
@@ -424,8 +450,11 @@ export async function runHook(options = {}) {
 
     // Antigravity Stop protocol contract
     if (isAntigravity) {
+      const prompt = typeof input.lastUserInput === 'string' ? input.lastUserInput.trim() : '';
+
       // Loop protection: allow exit if already forced continuation once or if aborted/errored
       if ((input.executionNum && input.executionNum > 1) ||
+          shouldSkipAntigravityStop(input, prompt) ||
           input.terminationReason === 'MAX_FORCED_INVOCATIONS' ||
           input.terminationReason === 'USER_CANCELED' ||
           input.terminationReason === 'ERROR') {
@@ -434,7 +463,6 @@ export async function runHook(options = {}) {
       }
 
       // If user input is available and was not actionable, allow exit immediately
-      const prompt = typeof input.lastUserInput === 'string' ? input.lastUserInput.trim() : '';
       if (prompt && !isActionableTask(prompt)) {
         process.stdout.write(JSON.stringify({}));
         process.exit(0);
