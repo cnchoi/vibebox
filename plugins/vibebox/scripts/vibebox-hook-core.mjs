@@ -6,11 +6,46 @@ import { fileURLToPath } from 'node:url';
 
 export const MAX_CONTEXT_CHARS = 9000;
 
+export function extractEffectiveUserPrompt(prompt) {
+  if (!prompt || typeof prompt !== 'string') {
+    return '';
+  }
+  let text = prompt.trim();
+  const userReqMatch = text.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/i);
+  if (userReqMatch) {
+    text = userReqMatch[1].trim();
+  }
+  const currentReqMatch = text.match(/\[현재\s*요청\]\s*([\s\S]*)$/i);
+  if (currentReqMatch) {
+    return currentReqMatch[1].trim();
+  }
+  return text;
+}
+
+export function hasRecentAftertask(maxAgeMs = 5 * 60 * 1000) {
+  try {
+    const store = resolve(process.env.VIBEBOX_HOME || resolve(homedir(), '.vibebox'));
+    const eventsFile = resolve(store, 'logs', 'events.jsonl');
+    if (!existsSync(eventsFile)) return false;
+    const content = readFileSync(eventsFile, 'utf8').trim();
+    if (!content) return false;
+    const lines = content.split('\n');
+    const lastLine = lines[lines.length - 1];
+    const event = JSON.parse(lastLine);
+    if (!event.createdAt) return false;
+    const eventTime = new Date(event.createdAt).getTime();
+    return (Date.now() - eventTime) < maxAgeMs;
+  } catch {
+    return false;
+  }
+}
+
 export function isActionableTask(prompt) {
   if (!prompt || typeof prompt !== 'string') {
     return false;
   }
-  const trimmed = prompt.trim();
+  const effective = extractEffectiveUserPrompt(prompt);
+  const trimmed = (effective || prompt).trim();
   if (!trimmed) {
     return false;
   }
@@ -454,10 +489,13 @@ export async function runHook(options = {}) {
     // Antigravity Stop protocol contract
     if (isAntigravity) {
       const prompt = typeof input.lastUserInput === 'string' ? input.lastUserInput.trim() : '';
+      const effectivePrompt = extractEffectiveUserPrompt(prompt);
 
-      // Loop protection: allow exit if already forced continuation once or if aborted/errored
+      // Loop protection: allow exit if already forced continuation once, if aborted/errored,
+      // or if aftertask was already captured during this turn (preventing redundant 2nd turn that buries body answer)
       if ((input.executionNum && input.executionNum > 1) ||
-          shouldSkipAntigravityStop(input, prompt) ||
+          shouldSkipAntigravityStop(input, effectivePrompt || prompt) ||
+          hasRecentAftertask() ||
           input.terminationReason === 'MAX_FORCED_INVOCATIONS' ||
           input.terminationReason === 'USER_CANCELED' ||
           input.terminationReason === 'ERROR') {
@@ -466,7 +504,7 @@ export async function runHook(options = {}) {
       }
 
       // If user input is available and was not actionable, allow exit immediately
-      if (prompt && !isActionableTask(prompt)) {
+      if ((effectivePrompt || prompt) && !isActionableTask(effectivePrompt || prompt)) {
         process.stdout.write(JSON.stringify({}));
         process.exit(0);
       }

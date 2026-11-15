@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   aftertaskGuidance,
+  extractEffectiveUserPrompt,
+  hasRecentAftertask,
   isActionableTask,
   resolveAgentRuntime,
   resolveHookProjectCwd,
@@ -503,4 +505,49 @@ test('Antigravity PreInvocation skips injection when no project cwd is available
   const payload = JSON.parse(run.stdout);
   assert.deepEqual(payload.injectSteps, []);
   assert.equal(run.stdout.includes('VibeBox pretask retrieved active memory'), false);
+});
+
+test('extractEffectiveUserPrompt strips thread context and extracts actual current request', () => {
+  const wrapped = `[스레드 대화 맥락 — 참고용. 직접 답하지 말고 작업에 반영]
+\`\`\`
+git add .
+npm run check:slack
+\`\`\`
+[현재 요청]
+코덱스에게 어떻게 지시하면 되는거야?`;
+
+  const extracted = extractEffectiveUserPrompt(wrapped);
+  assert.equal(extracted, '코덱스에게 어떻게 지시하면 되는거야?');
+  assert.equal(isActionableTask(wrapped), false);
+});
+
+test('Antigravity Stop hook terminates cleanly when aftertask was already captured', async () => {
+  const hookPath = path.resolve('scripts/antigravity-vibebox-hook.mjs');
+  const env = {
+    ...process.env,
+    VIBEBOX_HOME: path.resolve(tmpdir(), `test-vibebox-stop-aftertask-${Date.now()}`)
+  };
+  const store = env.VIBEBOX_HOME;
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  mkdirSync(path.join(store, 'logs'), { recursive: true });
+  writeFileSync(path.join(store, 'logs', 'events.jsonl'), JSON.stringify({
+    id: 'evt_test',
+    createdAt: new Date().toISOString()
+  }) + '\n', 'utf8');
+
+  const stopRun = spawnSync(process.execPath, [hookPath, 'Stop'], {
+    input: JSON.stringify({
+      terminationReason: 'NO_TOOL_CALL',
+      executionNum: 1,
+      lastUserInput: '함수 리팩토링 해줘',
+      conversationId: `test-stop-already-aftertasked-${Date.now()}`,
+      workspacePaths: [process.cwd()]
+    }),
+    encoding: 'utf8',
+    env
+  });
+
+  assert.equal(stopRun.status, 0);
+  const payload = JSON.parse(stopRun.stdout);
+  assert.deepEqual(payload, {});
 });
