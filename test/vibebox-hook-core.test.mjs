@@ -8,6 +8,7 @@ import {
   aftertaskGuidance,
   isActionableTask,
   resolveAgentRuntime,
+  resolveHookProjectCwd,
   truncate
 } from '../scripts/vibebox-hook-core.mjs';
 import { setupAntigravity } from '../src/core.mjs';
@@ -422,4 +423,59 @@ test('Plugin sync ensures plugins/vibebox/hooks.json exists and matches adapter'
     readFileSync(adapterHooks, 'utf8').trim(),
     readFileSync(pluginHooks, 'utf8').trim()
   );
+});
+
+const ANTIGRAVITY_APP_DIR = 'C:\\Users\\tester\\AppData\\Local\\Programs\\antigravity';
+
+test('resolveHookProjectCwd prefers a real workspace over the Antigravity app install dir', () => {
+  assert.equal(
+    resolveHookProjectCwd({ cwd: ANTIGRAVITY_APP_DIR, workspacePaths: ['D:\\projects\\demo'] }, {}),
+    'D:\\projects\\demo'
+  );
+  assert.equal(
+    resolveHookProjectCwd({ cwd: 'D:\\projects\\demo', workspacePaths: [ANTIGRAVITY_APP_DIR] }, {}),
+    'D:\\projects\\demo'
+  );
+  assert.equal(resolveHookProjectCwd({ cwd: 'D:\\projects\\demo' }, {}), 'D:\\projects\\demo');
+});
+
+test('resolveHookProjectCwd returns empty when only unusable candidates exist', () => {
+  assert.equal(resolveHookProjectCwd({}, {}), '');
+  assert.equal(resolveHookProjectCwd({ cwd: ANTIGRAVITY_APP_DIR }, {}), '');
+  assert.equal(resolveHookProjectCwd({ cwd: `${ANTIGRAVITY_APP_DIR}\\resources` }, {}), '');
+  assert.equal(resolveHookProjectCwd({ workspacePaths: ['D:\\repo\\node_modules\\pkg'] }, {}), '');
+});
+
+test('resolveHookProjectCwd honors VIBEBOX_PROJECT_DIR as an explicit pin', () => {
+  assert.equal(
+    resolveHookProjectCwd({ cwd: ANTIGRAVITY_APP_DIR }, { VIBEBOX_PROJECT_DIR: 'D:\\projects\\pinned' }),
+    'D:\\projects\\pinned'
+  );
+  assert.equal(
+    resolveHookProjectCwd({ cwd: 'D:\\projects\\demo' }, { VIBEBOX_PROJECT_DIR: 'D:\\projects\\pinned' }),
+    'D:\\projects\\demo'
+  );
+});
+
+test('Antigravity PreInvocation skips injection when no project cwd is available', () => {
+  const hookPath = path.resolve('scripts/antigravity-vibebox-hook.mjs');
+  const env = { ...process.env, CLAUDE_PLUGIN_ROOT: path.resolve('.') };
+  delete env.VIBEBOX_PROJECT_DIR;
+
+  const run = spawnSync(process.execPath, [hookPath, 'PreInvocation'], {
+    input: JSON.stringify({
+      lastUserInput: '함수 리팩토링 및 테스트 코드 작성',
+      conversationId: `test-convo-nocwd-${process.pid}-${Date.now()}`,
+      initialNumSteps: 0,
+      invocationNum: 1,
+      cwd: ANTIGRAVITY_APP_DIR
+    }),
+    encoding: 'utf8',
+    env
+  });
+
+  assert.equal(run.status, 0);
+  const payload = JSON.parse(run.stdout);
+  assert.deepEqual(payload.injectSteps, []);
+  assert.equal(run.stdout.includes('VibeBox pretask retrieved active memory'), false);
 });

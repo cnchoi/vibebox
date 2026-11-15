@@ -1869,7 +1869,8 @@ function isIgnoredProjectRoot(root) {
     || segments.includes('node_modules')
     || segments.includes('plugin cache')
     || normalized.includes(`${path.sep}plugins${path.sep}cache${path.sep}`)
-    || normalized.endsWith(`${path.sep}plugins${path.sep}cache`);
+    || normalized.endsWith(`${path.sep}plugins${path.sep}cache`)
+    || /[\\/]appdata[\\/]local[\\/]programs[\\/]antigravity(?:[\\/]|$)/iu.test(normalized);
 }
 
 function virtualProjectIdentity(root) {

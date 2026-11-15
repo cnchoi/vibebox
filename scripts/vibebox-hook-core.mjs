@@ -203,6 +203,31 @@ function shouldSkipAntigravityPreInvocation(input, prompt) {
   return false;
 }
 
+const NON_PROJECT_CWD_PATTERN = /[\\/](?:appdata[\\/]local[\\/]programs[\\/]antigravity|node_modules)(?:[\\/]|$)/iu;
+
+// The cwd a hook should attribute memory to. Hook payloads are the source of truth; the
+// env var is an explicit opt-in pin for hosts that never send one. Returns '' when every
+// candidate is unusable (missing, the agent's own install dir, or a dependency folder) so
+// callers can skip instead of inventing a project.
+export function resolveHookProjectCwd(input = {}, env = process.env) {
+  const candidates = [
+    input.cwd,
+    Array.isArray(input.workspacePaths) ? input.workspacePaths[0] : '',
+    env && env.VIBEBOX_PROJECT_DIR ? env.VIBEBOX_PROJECT_DIR : ''
+  ];
+  for (const value of candidates) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    const candidate = value.trim();
+    if (!candidate || NON_PROJECT_CWD_PATTERN.test(candidate)) {
+      continue;
+    }
+    return candidate;
+  }
+  return '';
+}
+
 export async function runHook(options = {}) {
   const callerUrl = options.callerUrl || import.meta.url;
   const scriptDir = dirname(fileURLToPath(callerUrl));
@@ -335,7 +360,16 @@ export async function runHook(options = {}) {
       process.exit(0);
     }
 
-    const targetCwd = input.cwd || (Array.isArray(input.workspacePaths) && input.workspacePaths[0]) || process.cwd();
+    const targetCwd = resolveHookProjectCwd(input) || (isAntigravity ? '' : process.cwd());
+    if (!targetCwd) {
+      // Antigravity can fire hooks with no workspace open, in which case cwd is its own
+      // app install directory. Binding memory to that path created a ghost project, so
+      // skip the injection instead of attributing it to the wrong place.
+      if (isAntigravity) {
+        process.stdout.write(JSON.stringify({ injectSteps: [] }));
+      }
+      process.exit(0);
+    }
     const result = runVibeBox(['pretask', '--task', prompt], targetCwd);
     const pretaskFailure = `${result.stderr}${result.stdout}`;
 
