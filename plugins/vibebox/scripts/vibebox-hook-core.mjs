@@ -161,9 +161,14 @@ export function initializationGuidance(vibeboxCli) {
 export function aftertaskGuidance(vibeboxCli, runtime) {
   const isWin32 = process.platform === 'win32';
   const aftertaskArgs = 'aftertask --request "<original user request or faithful summary>" --summary "..." --candidates-file <structured-candidates.json> --technical-outcome success|failure|partial|unknown --user-acceptance accepted|rejected|mixed|unknown';
-  const cmdCmd = `set VIBEBOX_AGENT_RUNTIME=${runtime} && node "${vibeboxCli}" ${aftertaskArgs}`;
-  const pwshCmd = `$env:VIBEBOX_AGENT_RUNTIME="${runtime}"; node "${vibeboxCli}" ${aftertaskArgs}`;
-  const bashCmd = `VIBEBOX_AGENT_RUNTIME=${runtime} node "${vibeboxCli}" ${aftertaskArgs}`;
+  // Hosts such as Claude Code reject any command that assigns environment variables
+  // ("Command modifies environment variables"), so when the runtime marker is already
+  // exported in the session environment the guidance must be a plain command.
+  const runtimeAlreadyExported = Boolean(process.env.VIBEBOX_AGENT_RUNTIME);
+  const bareCmd = `node "${vibeboxCli}" ${aftertaskArgs}`;
+  const cmdCmd = runtimeAlreadyExported ? bareCmd : `set VIBEBOX_AGENT_RUNTIME=${runtime} && ${bareCmd}`;
+  const pwshCmd = runtimeAlreadyExported ? bareCmd : `$env:VIBEBOX_AGENT_RUNTIME="${runtime}"; ${bareCmd}`;
+  const bashCmd = runtimeAlreadyExported ? bareCmd : `VIBEBOX_AGENT_RUNTIME=${runtime} ${bareCmd}`;
 
   // The host shell is a property of the agent, not of the OS: Antigravity executes
   // tool commands through cmd.exe on Windows, while Claude Code and Codex run their
@@ -179,9 +184,11 @@ export function aftertaskGuidance(vibeboxCli, runtime) {
     'Do not stop yet if this turn performed meaningful coding, documentation, packaging, review, validation, or debugging work and the user did not opt out.',
     `Run \`node "${vibeboxCli}" schema --format json\` before writing candidate JSON.`,
     `Then run \`${primaryCmd}\`.`,
-    altHints.join(' '),
+    altHints.filter(Boolean).join(' '),
     'The schema reads the configured memoryLanguage. Write displayTitle, displaySummary, and displayRule in that exact user language and set displayLanguage to the exact schema value; Core rejects missing or mismatched display fields.',
-    `Ensure agent runtime is set (e.g. \`VIBEBOX_AGENT_RUNTIME=${runtime}\`) so memory attribution is recorded correctly.`,
+    runtimeAlreadyExported
+      ? `Agent runtime is already exported as \`${process.env.VIBEBOX_AGENT_RUNTIME}\`; do not prefix the command with an environment assignment.`
+      : `Ensure agent runtime is set (e.g. \`VIBEBOX_AGENT_RUNTIME=${runtime}\`) so memory attribution is recorded correctly.`,
     'The AI agent must provide structured candidates for reusable memory. Core will not infer active memory from raw summaries.',
     'If no durable memory exists, submit no_reusable_memory_candidate with noCandidateReason instead of skipping the checkpoint.'
   ].join('\n');
