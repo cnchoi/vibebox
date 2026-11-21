@@ -18,7 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withStoreLock } from './store-lock.mjs';
 
-export const VIBEBOX_VERSION = '0.2.2';
+export const VIBEBOX_VERSION = '0.2.3';
 
 const WIKI_DOCS = [
   { docKey: 'home', canonicalFileName: 'Home.md', titleKey: 'homeTitle', fileNameKey: 'homeFileName' },

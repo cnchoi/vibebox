@@ -5398,9 +5398,11 @@ test('Claude Stop hook blocks once for the aftertask checkpoint', async () => {
   assert.equal(payload.decision, 'block');
   assert.match(payload.reason, /VibeBox aftertask checkpoint/);
   assert.match(payload.reason, /no_reusable_memory_candidate/);
-  assert.equal(payload.hookSpecificOutput.hookEventName, 'Stop');
-  assert.match(payload.hookSpecificOutput.additionalContext, /schema --format json/);
-  assert.match(payload.hookSpecificOutput.additionalContext, /exact user language/i);
+  assert.match(payload.reason, /schema --format json/);
+  // Codex parses Stop with deny_unknown_fields (openai/codex#18887): any extra key such as
+  // hookSpecificOutput makes codex print "hook: Stop Failed" and the nudge is lost.
+  assert.deepEqual(Object.keys(payload).sort(), ['decision', 'reason']);
+  assert.equal(payload.hookSpecificOutput, undefined);
 
   const recursiveStop = spawnSync(process.execPath, [hookPath], {
     input: JSON.stringify({

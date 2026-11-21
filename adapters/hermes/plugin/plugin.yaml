@@ -1,0 +1,7 @@
+name: vibebox
+version: "0.3.0"
+description: "Inject VibeBox active project memory before each turn (pre_llm_call), remember the last repository each session touched (post_tool_call) so gateway turns get project memory too, and append a one-line reminder when repository work ran without an aftertask capture."
+author: "Hermes adapter for VibeBox"
+provides_hooks:
+  - pre_llm_call
+  - post_tool_call

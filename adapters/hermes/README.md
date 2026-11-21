@@ -53,6 +53,37 @@ node "<vibebox-plugin-root>/bin/vibebox.mjs" aftertask \
   --candidates '<structured-candidates-json>'
 ```
 
+## Aftertask Reminder (`post_tool_call` capture nudge)
+
+Injection alone never writes memory: `aftertask` needs agent-authored request/summary/candidates, so
+the Hermes plugin cannot capture on the agent's behalf. It can only notice that a capture is missing.
+
+- `post_tool_call` records two timestamps per session in `$HERMES_HOME/cache/vibebox/session_cwd.json`:
+  `repo_touched_at` (a tool touched a path inside a repository) and `aftertask_at` (the tool call ran
+  `vibebox aftertask` / `vibebox capture`).
+- `pre_llm_call` appends one reminder line to the turn when `repo_touched_at > aftertask_at`. It fires
+  at most once per 10 minutes per session, and any capture in that session clears it.
+- The reminder follows the store language (`contextLanguage` / `outputLanguage` in `~/.vibebox/config.json`).
+- It is a nudge, not a briefing: the agent still decides when the work is finished and what the capture says.
+
+Timestamps are sub-second floats on purpose — work → capture → work inside the same wall-clock second
+must still order correctly.
+
+## Plugin Source And Deployment
+
+`adapters/hermes/plugin/` is the single source of truth for the Hermes plugin. The live directory
+(`$HERMES_HOME/plugins/vibebox`) is only a copy:
+
+```bash
+npm run sync:hermes-plugin    # copy source -> live plugin dir (backs up the previous copy)
+npm run check:hermes-plugin   # exit 1 when the live copy drifts (also chained into `npm run check`)
+npm run test:hermes-plugin    # python -m unittest on reminder/briefing behaviour
+```
+
+Hermes imports plugins at gateway start, so a deployed change needs `hermes gateway restart`. When a
+live chat session refuses the restart, run `gateway-service/gwcycle.bat` from a one-shot scheduled task
+instead of killing the turn in progress.
+
 ## Migration & Deterministic Wiki Rebuild
 
 When moving to a new machine:

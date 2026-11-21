@@ -365,6 +365,17 @@ export async function runHook(options = {}) {
 
   function emitClaudeBlock(event, reason) {
     const message = truncate(reason);
+    // Stop output contract: Claude and Codex both accept {decision, reason} only.
+    // Codex parses the Stop payload with deny_unknown_fields and reports "hook: Stop Failed"
+    // as soon as hookSpecificOutput is present (openai/codex#18887). That failure silently drops
+    // the aftertask nudge, so nothing is ever captured — keep this event minimal.
+    if (event === 'Stop') {
+      process.stdout.write(JSON.stringify({
+        decision: 'block',
+        reason: message
+      }));
+      return;
+    }
     process.stdout.write(JSON.stringify({
       decision: 'block',
       reason: message,

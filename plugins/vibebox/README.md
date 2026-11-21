@@ -155,10 +155,10 @@ Then enable the `vibebox` plugin in Codex and start a new session if the host do
 
 Codex App can read an installed plugin cache instead of your local checkout. A GitHub push alone does not update that installed cache. After updating local plugin source, run `git pull` or reinstall the plugin, then verify the cache folder and key file hashes.
 
-Example cache placeholder:
+Example cache placeholder (the version folder itself is the cache-busting part):
 
 ```text
-%USERPROFILE%\.codex\plugins\cache\boksajang\vibebox\0.2.2\
+%USERPROFILE%\.codex\plugins\cache\boksajang\vibebox\0.2.3\
 ```
 
 VibeBox does not delete or rewrite Codex App plugin cache files automatically.
