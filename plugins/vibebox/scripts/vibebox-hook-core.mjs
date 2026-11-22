@@ -190,6 +190,7 @@ export function aftertaskGuidance(vibeboxCli, runtime) {
       ? `Agent runtime is already exported as \`${process.env.VIBEBOX_AGENT_RUNTIME}\`; do not prefix the command with an environment assignment.`
       : `Ensure agent runtime is set (e.g. \`VIBEBOX_AGENT_RUNTIME=${runtime}\`) so memory attribution is recorded correctly.`,
     'The AI agent must provide structured candidates for reusable memory. Core will not infer active memory from raw summaries.',
+    'Do not end this turn with a bare `NO_REPLY` marker or an empty message. Chat bridges such as cc-connect/Feishu stream a preview and then withdraw it when the final message is only `NO_REPLY`; after the checkpoint, restate your final answer to the user instead of emitting the marker.',
     'If no durable memory exists, submit no_reusable_memory_candidate with noCandidateReason instead of skipping the checkpoint.'
   ].join('\n');
 }
