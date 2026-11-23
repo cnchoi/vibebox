@@ -204,6 +204,7 @@ export function aftertaskGuidance(vibeboxCli, runtime) {
     `Then run \`${primaryCmd}\`.`,
     altHints.filter(Boolean).join(' '),
     'The schema reads the configured memoryLanguage. Write displayTitle, displaySummary, and displayRule in that exact user language and set displayLanguage to the exact schema value; Core rejects missing or mismatched display fields.',
+    'For cross-language retrieval, keep display* fields in memoryLanguage but include trilingual keywords (Korean + Chinese + English) in the tags array (e.g. ["입력창", "输入框", "input-box", "레이아웃", "布局", "layout"]).',
     runtimeAlreadyExported
       ? `Agent runtime is already exported as \`${process.env.VIBEBOX_AGENT_RUNTIME}\`; do not prefix the command with an environment assignment.`
       : `Ensure agent runtime is set (e.g. \`VIBEBOX_AGENT_RUNTIME=${runtime}\`) so memory attribution is recorded correctly.`,

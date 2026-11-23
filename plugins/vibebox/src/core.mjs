@@ -310,6 +310,7 @@ const STRUCTURED_CANDIDATE_REQUIRED_FIELDS = [
   'sourceType'
 ];
 const STRUCTURED_CANDIDATE_RECOMMENDED_FIELDS = [
+  'tags',
   'relatedCategories',
   'rule',
   'evidence',
@@ -1401,6 +1402,7 @@ function structuredCandidateSkeleton(locale = 'en-US') {
     scope,
     primaryCategory,
     relatedCategories: [],
+    tags: ['<core-concept-ko>', '<core-concept-zh>', '<core-concept-en>'],
     title: '<canonical English title>',
     summary: '<canonical English reusable memory summary>',
     rule: '<canonical English rule or guidance>',
@@ -1470,6 +1472,8 @@ export function structuredCandidateSchema(options = {}) {
       'Invalid guesses such as project_outcome, project_result, success_memory, or project_memory are contract failures unless the schema explicitly returns them.',
       'Start active memory from candidateSkeleton; start no-memory diagnostics from noReusableMemoryCandidate.',
       'Use primaryCategory for the canonical category and relatedCategories for additional category links.',
+      'displayTitle, displaySummary, and displayRule must be authored exclusively in the configured memoryLanguage.',
+      'Include trilingual keywords in the tags array (Korean + Chinese + English) for cross-language retrieval (e.g. ["입력창", "输入框", "input-box", "레이아웃", "布局", "layout"]).',
       'If exactly one candidate is submitted for a non-trivial userRequest, include whyOnlyOneCandidate.'
     ]
   };
@@ -2631,8 +2635,19 @@ function extractTags(statement) {
     if (normalized.includes(normalizeText(item))) tags.add(item);
   }
   for (const token of normalized.split(/\s+/u)) {
-    if (token.length >= 5 && !STOP_WORDS.has(token) && tags.size < 12) {
+    const isCjk = CJK_CHAR_REGEX.test(token);
+    const minLen = isCjk ? 2 : 5;
+    if (token.length >= minLen && !STOP_WORDS.has(token) && tags.size < 16) {
       tags.add(token);
+    }
+  }
+  const hanziRuns = normalized.match(HANZI_RUN_REGEX) || [];
+  for (const run of hanziRuns) {
+    if (run.length >= 2 && tags.size < 16) {
+      tags.add(run);
+      for (let i = 0; i < run.length - 1; i += 1) {
+        if (tags.size < 16) tags.add(run.slice(i, i + 2));
+      }
     }
   }
   return [...tags];
@@ -4094,6 +4109,7 @@ export function memoryKeywords(memory) {
     memory.type,
     memory.scope,
     memory.topic,
+    ...(memory.tags || []),
     memory.title,
     memory.summary,
     memory.rule,
@@ -4107,7 +4123,6 @@ export function memoryKeywords(memory) {
     memory.preventionRule,
     memory.failedApproach,
     memory.successfulApproach,
-    ...(memory.tags || []),
     ...(memory.domains || []),
     ...(memory.appliesTo || [])
   ].join(' ');
@@ -4130,6 +4145,12 @@ export function memoryKeywords(memory) {
   for (const token of rawTokens) {
     if (keywords.length >= 60) break;
     addKeyword(token);
+    if (token.includes('-') || token.includes('_')) {
+      const parts = token.split(/[-_]/u);
+      for (const part of parts) {
+        addKeyword(part);
+      }
+    }
   }
 
   // 2. Korean Josa co-indexing (append stem if available)
@@ -4141,6 +4162,19 @@ export function memoryKeywords(memory) {
   // 3. Chinese Hanzi 2-grams (append 2-grams so they are not crowded out)
   for (const token of rawTokens) {
     const grams = extractHanzi2Grams(token);
+    for (const gram of grams) addKeyword(gram);
+  }
+
+  // 4. Ensure all explicit tags are indexed without being crowded out
+  for (const tag of memory.tags || []) {
+    const normalizedTag = normalizeText(tag);
+    if (isValidKeywordToken(normalizedTag)) addKeyword(normalizedTag);
+    for (const sub of normalizedTag.split(/[\s_-]+/u)) {
+      if (isValidKeywordToken(sub)) addKeyword(sub);
+      const stem = extractKoreanJosaStem(sub);
+      if (stem) addKeyword(stem);
+    }
+    const grams = extractHanzi2Grams(normalizedTag);
     for (const gram of grams) addKeyword(gram);
   }
 
@@ -4880,9 +4914,11 @@ function scoreMemoryDetailed(memory, task, config = {}) {
     score += 24;
     matchScore += 24;
   }
-  if ((memory.tags || []).some((tag) => normalizeText(task).includes(normalizeText(tag)))) {
-    score += 18;
-    matchScore += 18;
+  const matchedTags = (memory.tags || []).filter((tag) => tag && normalizeText(task).includes(normalizeText(tag)));
+  if (matchedTags.length > 0) {
+    const bonus = 18 * Math.min(matchedTags.length, 3);
+    score += bonus;
+    matchScore += bonus;
   }
   if (memoryBelongsToCurrentProject(memory, config.projectIds || config.projectId)) score += 25;
   if (memory.scope === 'project') score += 16;
@@ -5042,6 +5078,7 @@ function memoryMatchesTaskDomain(memory, taskContext = {}, projectId = null) {
   const domainScoped = memory.scope === 'domain' || memory.modelClass === 'domain_model';
 
   if (domainScoped) {
+    if ((memory.tags || []).some((tag) => tag && normalizeText(task).includes(normalizeText(tag)))) return true;
     if (setOverlap(memory.tags || [], taskTags) > 0) return true;
     if (memory.topic && normalizeText(task).includes(normalizeText(memory.topic))) return true;
     if (memoryDomains.length > 0 && setOverlap(memoryDomains, taskDomains) > 0) return true;

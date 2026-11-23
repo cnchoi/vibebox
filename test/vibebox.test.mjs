@@ -1851,6 +1851,71 @@ test('retrieval indexes localized display fields for user-language task matching
   assert.match(brief, /localized-technology-match.*match=[1-9]\d*/s);
 });
 
+test('trilingual tags enable cross-language retrieval in Chinese, Korean, and English while keeping wiki Korean', async () => {
+  const root = await makeWorkspace();
+  await initVibeBox(root, {
+    language: 'ko-KR',
+    displayTemplate: agentDisplayTemplate('ko-KR', KOREAN_DISPLAY_TEMPLATE_OVERRIDES)
+  });
+
+  await extractFromAgent(root, {
+    structuredMemoryCandidates: [
+      candidateFixture({
+        candidateId: 'trilingual-input-box-layout',
+        type: 'design_preference',
+        modelClass: 'project_model',
+        modelSubClass: 'design_preference_model',
+        scope: 'project',
+        primaryCategory: 'user_preferences',
+        tags: ['입력창', '输入框', 'input-box', '레이아웃', '布局', 'layout'],
+        title: 'Input box and output box layout sizing',
+        summary: 'Set input box and output box to equal sizing in layout.',
+        rule: 'Always balance input box and output box sizing in layout.',
+        displayTitle: '입력창 및 출력창 레이아웃 크기 일치',
+        displaySummary: '입력창과 출력창의 레이아웃 크기를 동일하게 맞춥니다.',
+        displayRule: '입력창과 출력창의 레이아웃 크기를 항상 균형 있게 일치시킵니다.',
+        displayLanguage: 'ko-KR'
+      })
+    ]
+  });
+
+  // 1) 중국어 작업 지시로 generatePreTaskBrief 호출 시 해당 한국어 기억 정상 검색
+  const briefZh = await generatePreTaskBrief(root, {
+    task: '把输入框的布局调一下',
+    debug: true
+  });
+  assert.match(briefZh, /입력창과 출력창의 레이아웃 크기를 동일하게 맞춥니다/u);
+  assert.match(briefZh, /trilingual-input-box-layout/);
+
+  // 2) 한국어 작업 지시 및 영어 작업 지시에서도 동일하게 검색
+  const briefKo = await generatePreTaskBrief(root, {
+    task: '입력창 레이아웃 수정',
+    debug: true
+  });
+  assert.match(briefKo, /입력창과 출력창의 레이아웃 크기를 동일하게 맞춥니다/u);
+  assert.match(briefKo, /trilingual-input-box-layout/);
+
+  const briefEn = await generatePreTaskBrief(root, {
+    task: 'fix input-box layout',
+    debug: true
+  });
+  assert.match(briefEn, /입력창과 출력창의 레이아웃 크기를 동일하게 맞춥니다/u);
+  assert.match(briefEn, /trilingual-input-box-layout/);
+
+  // 3) 위키 마크다운(rebuildWiki)에는 한국어 표시 제목/내용만 깔끔하게 출력
+  await rebuildVibeBox(root, { wikiOnly: true });
+  const wikiDir = storePath(root, 'wiki');
+  const wikiFiles = await readdir(wikiDir, { recursive: true });
+  const memoryNoteFile = wikiFiles.find((f) => f.includes('입력창 및 출력창 레이아웃 크기 일치') || f.includes('입력창'));
+  assert.ok(memoryNoteFile, 'Memory note markdown file should exist with Korean title');
+  const noteContent = await readFile(path.join(wikiDir, memoryNoteFile), 'utf8');
+  assert.match(noteContent, /입력창 및 출력창 레이아웃 크기 일치/u);
+  assert.match(noteContent, /입력창과 출력창의 레이아웃 크기를 동일하게 맞춥니다/u);
+  // 위키 본문에는 한국어 외 중국어/영어 본문 유출이 없어야 함
+  assert.doesNotMatch(noteContent, /Set input box and output box/i);
+  assert.doesNotMatch(noteContent, /输入框.*布局/u);
+});
+
 test('project memory is not crowded out by matching global memory limits', async () => {
   const root = await makeWorkspace();
   await initVibeBox(root);

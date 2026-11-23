@@ -54,6 +54,7 @@ Treat the schema output as the contract for the current runtime. Do not write ca
 - Start from `candidateSkeleton` or `noReusableMemoryCandidate`, then replace placeholder text with the actual semantic memory.
 - A reusable candidate must include every `requiredFields` entry and localized `displayTitle`, `displaySummary`, `displayRule`, and `displayLanguage`.
 - `schema` reads the initialized store's `memoryLanguage`. Write every display field in that exact user language; do not copy the canonical English fields into display fields for a non-English store.
+- Include trilingual keywords (Korean + Chinese + English) in the `tags` array for cross-language retrieval (e.g. `["입력창", "输入框", "input-box", "레이아웃", "布局", "layout"]`), while keeping `displayTitle`, `displaySummary`, and `displayRule` strictly in `memoryLanguage` for a clean Obsidian Wiki.
 - If exactly one candidate is submitted for a non-trivial user request, include `whyOnlyOneCandidate` in the candidate or envelope.
 - If no durable reusable memory exists, submit only `no_reusable_memory_candidate` with `noCandidateReason`; do not force a fake `task_context`.
 - If Core rejects a candidate for missing fields or invalid enum values, stop guessing, rerun schema, rebuild the candidate from the skeleton, and retry once.
@@ -142,16 +143,17 @@ After meaningful coding, design, documentation, packaging, or review work:
 8. Before writing candidate JSON, run `node "<vibebox-plugin-root>/bin/vibebox.mjs" schema --format json` and use the returned Core enum values, category model, defaults, and skeleton. Do not invent `memoryRole`, `type`, `modelClass`, `scope`, `sourceType`, `primaryCategory`, or `relatedCategories` values from prose.
 9. Include fields such as `memoryRole`, `type`, `modelClass`, `modelSubClass`, `scope`, `primaryCategory`, `relatedCategories`, `title`, `summary`, `rule`, `displayTitle`, `displaySummary`, `displayRule`, `displayLanguage`, `evidence`, `confidence`, `sourceType`, `relationCandidates`, and `replaces` when applicable.
 10. Write every display field in the exact configured `memoryLanguage`, whatever the user's language is. Do not hardcode Korean, English, or the operating-system locale.
-11. Use `--candidates-file` or `--structured-candidates-file` for long JSON, especially on Windows shells.
-12. Run:
+11. Include trilingual keywords (Korean + Chinese + English) in the `tags` array for cross-language retrieval (e.g. `["입력창", "输入框", "input-box", "레이아웃", "布局", "layout"]`). This enables memory to be accurately retrieved when instructions are given in Chinese, English, or Korean without leaking other languages into the Obsidian Wiki notes.
+12. Use `--candidates-file` or `--structured-candidates-file` for long JSON, especially on Windows shells.
+13. Run:
 
 ```bash
 node "<vibebox-plugin-root>/bin/vibebox.mjs" aftertask --request "<request>" --summary "..." --candidates-file structured-candidates.json --technical-outcome success --user-acceptance unknown
 ```
 
-13. If aftertask write access is blocked, request approved global VibeBox store write access or report that capture, project registration, active memory, and wiki updates were not completed.
-14. If VibeBox rejects a candidate for a missing required field or invalid enum, rerun the bundled CLI's `schema --format json`, rebuild from `candidateSkeleton` or `noReusableMemoryCandidate`, and resubmit once. Do not repeatedly guess values.
-15. If VibeBox warns that candidates are missing or `whyOnlyOneCandidate` is missing, rewrite the capture input and rerun when reusable memory should be stored.
+14. If aftertask write access is blocked, request approved global VibeBox store write access or report that capture, project registration, active memory, and wiki updates were not completed.
+15. If VibeBox rejects a candidate for a missing required field or invalid enum, rerun the bundled CLI's `schema --format json`, rebuild from `candidateSkeleton` or `noReusableMemoryCandidate`, and resubmit once. Do not repeatedly guess values.
+16. If VibeBox warns that candidates are missing or `whyOnlyOneCandidate` is missing, rewrite the capture input and rerun when reusable memory should be stored.
 
 `aftertask` is a global-store write/capture operation.
 
