@@ -20,8 +20,10 @@ import {
   approveMemory,
   assertSafeWikiRoot,
   backupVibeBox,
+  calculateBm25Score,
   captureEvent,
   classifyCandidateConflict,
+  computeCorpusStats,
   convertLanguage,
   displayTemplateSchema,
   extractMemoryCandidates,
@@ -45,6 +47,7 @@ import {
   restoreVibeBox,
   reviewPending,
   runDoctor,
+  scoreMemoryDetailed,
   structuredCandidateSchema,
   VIBEBOX_VERSION
 } from '../src/core.mjs';
@@ -1914,6 +1917,197 @@ test('trilingual tags enable cross-language retrieval in Chinese, Korean, and En
   // 위키 본문에는 한국어 외 중국어/영어 본문 유출이 없어야 함
   assert.doesNotMatch(noteContent, /Set input box and output box/i);
   assert.doesNotMatch(noteContent, /输入框.*布局/u);
+});
+
+test('retrieval prioritizes rare BM25 keywords over ubiquitous common words', async () => {
+  const root = await makeWorkspace();
+  await initVibeBox(root);
+
+  // 1. 4 memories sharing common words ("파일", "코드", "수정", "작업") across generic topics
+  const commonMemories = [1, 2, 3, 4].map((i) => candidateFixture({
+    candidateId: `common-work-memory-${i}`,
+    type: 'process_pattern',
+    modelClass: 'user_model',
+    scope: 'global',
+    primaryCategory: 'process_patterns',
+    topic: `generic file process ${i}`,
+    title: `일반 파일 작업 규칙 ${i}`,
+    summary: `파일 수정 작업 진행 시 코드 파일 백업과 변경 사항 확인 ${i}`,
+    rule: `코드 파일 수정 시 백업을 수행한다 ${i}`
+  }));
+
+  // 2. 1 memory with a unique rare keyword ("OpenClash")
+  const rareMemory = candidateFixture({
+    candidateId: 'openclash-routing-rule',
+    type: 'avoid_rule',
+    modelClass: 'domain_model',
+    scope: 'global',
+    primaryCategory: 'global_avoid_rules',
+    topic: 'OpenClash traffic routing',
+    title: 'OpenClash 트래픽 라우팅 충돌 방지',
+    summary: 'OpenClash 프록시 라우팅 규칙 파일 수정 시 커널 룰 충돌을 방지한다.',
+    rule: 'OpenClash 라우팅 설정 시 기본 게이트웨이 변경을 피한다.',
+    domains: ['network', 'openclash'],
+    tags: ['openclash', 'proxy', 'routing']
+  });
+
+  await extractMemoryCandidates(root, {
+    structuredMemoryCandidates: [...commonMemories, rareMemory]
+  });
+
+  // Query contains common words ("파일", "수정") AND rare keyword ("OpenClash")
+  const task = 'OpenClash 설정 파일 수정해줘';
+  const brief = await generatePreTaskBrief(root, { task, debug: true });
+
+  // OpenClash 기억이 최우선으로 검색되어 브리프 상단에 포함되어야 함
+  assert.match(brief, /OpenClash/);
+  assert.match(brief, /openclash-routing-rule/);
+  const openclashIndex = brief.indexOf('openclash-routing-rule');
+  assert.ok(openclashIndex > 0);
+  for (let i = 1; i <= 4; i++) {
+    const commonIndex = brief.indexOf(`common-work-memory-${i}`);
+    if (commonIndex !== -1) {
+      assert.ok(openclashIndex < commonIndex, `rare keyword memory should rank above common-work-memory-${i}`);
+    }
+  }
+});
+
+test('noise threshold filters out technical memories matching only common words while preserving user baseline', async () => {
+  const root = await makeWorkspace();
+  await initVibeBox(root);
+
+  await extractMemoryCandidates(root, {
+    structuredMemoryCandidates: [
+      // 사용자 베이스라인 프로필 (키워드 매칭 0점이어도 항상 보존)
+      candidateFixture({
+        candidateId: 'user-profile-baseline',
+        type: 'user_preference',
+        modelClass: 'user_model',
+        scope: 'global',
+        primaryCategory: 'user_preferences',
+        title: '초보자 쉬운 말 설명 선호',
+        summary: '사용자는 초보자도 이해할 수 있도록 쉬운 말로 설명하는 방식을 선호한다.',
+        rule: '전문 용어보다는 초보자가 이해하기 쉬운 비유와 평이한 단어로 설명한다.'
+      }),
+      // 여러 기억에 공통으로 흔하게 등장하는 일반 작업 기억들 ("수정", "파일")
+      candidateFixture({
+        candidateId: 'common-code-modification',
+        type: 'process_pattern',
+        modelClass: 'user_model',
+        scope: 'global',
+        primaryCategory: 'process_patterns',
+        topic: 'code modification process',
+        title: '코드 수정 표준 절차',
+        summary: '코드 및 파일 수정 시 빌드 테스트를 실행한다.',
+        rule: '코드 수정 전후로 테스트를 수행한다.'
+      }),
+      candidateFixture({
+        candidateId: 'common-config-modification',
+        type: 'process_pattern',
+        modelClass: 'user_model',
+        scope: 'global',
+        primaryCategory: 'process_patterns',
+        topic: 'config modification process',
+        title: '설정 수정 표준 절차',
+        summary: '설정 파일 수정 시 기존 설정 백업을 생성한다.',
+        rule: '설정 파일 수정 시 백업을 수행한다.'
+      }),
+      // 흔한 단어("수정")를 포함하지만 실제 작업과는 무관한 타 도메인 기술 검증 기억들
+      candidateFixture({
+        candidateId: 'svg-dashboard-verification',
+        type: 'validation_pattern',
+        modelClass: 'domain_model',
+        scope: 'domain',
+        primaryCategory: 'validation_patterns',
+        topic: 'SVG dashboard playwright test',
+        title: 'SVG 대시보드 Playwright 검증',
+        summary: 'SVG 대시보드 렌더링 수정 시 Playwright 스크린샷 비교를 수행한다.',
+        rule: '대시보드 SVG 요소는 Playwright 시각 회귀 테스트로 검증한다.',
+        domains: ['dashboard', 'svg'],
+        tags: ['dashboard', 'svg', 'playwright']
+      }),
+      candidateFixture({
+        candidateId: 'markdown-table-mutation',
+        type: 'validation_pattern',
+        modelClass: 'domain_model',
+        scope: 'domain',
+        primaryCategory: 'validation_patterns',
+        topic: 'Markdown table format mutation',
+        title: '마크다운 테이블 수정 검증',
+        summary: '마크다운 테이블 서식 수정 시 파이프 정렬과 줄바꿈을 검증한다.',
+        rule: '마크다운 테이블 서식 수정은 열 정렬을 검증한다.',
+        domains: ['markdown'],
+        tags: ['markdown', 'table']
+      }),
+      candidateFixture({
+        candidateId: 'browser-stub-timing',
+        type: 'validation_pattern',
+        modelClass: 'domain_model',
+        scope: 'global',
+        primaryCategory: 'validation_patterns',
+        topic: 'BROWSER stub timing verification',
+        title: 'BROWSER 스텁 시각 실측',
+        summary: 'BROWSER 환경변수 수정 시 스텁 스크립트로 브라우저 호출 시각을 실측한다.',
+        rule: '자동 브라우저 열기 요구사항은 BROWSER 스텁으로 검증한다.',
+        domains: ['browser', 'tooling'],
+        tags: ['browser', 'stub']
+      })
+    ]
+  });
+
+  // 단순 일반 지시어 (흔한 단어 "파일", "수정"만 포함)
+  const task = '파일 좀 수정해줘';
+  const brief = await generatePreTaskBrief(root, { task, debug: true });
+  const context = await generateContextPack(root, { task });
+
+  // 1. 사용자 글로벌 베이스라인은 키워드 매칭 0점이어도 무조건 통과
+  assert.match(brief, /초보자/);
+  assert.match(context, /초보자/);
+
+  // 2. 단지 흔한 단어("수정")가 들어있다는 이유로 무관한 타 도메인 기술 기억들이 주입되지 않아야 함 (minMatchScore에 의해 걸러짐)
+  assert.doesNotMatch(brief, /Playwright/i);
+  assert.doesNotMatch(brief, /SVG/i);
+  assert.doesNotMatch(brief, /마크다운/);
+  assert.doesNotMatch(brief, /BROWSER/i);
+  assert.doesNotMatch(context, /Playwright/i);
+  assert.doesNotMatch(context, /SVG/i);
+  assert.doesNotMatch(context, /마크다운/);
+  assert.doesNotMatch(context, /BROWSER/i);
+});
+
+test('small repository with single memory retrieves cleanly without IDF zero-out', async () => {
+  const root = await makeWorkspace();
+  await initVibeBox(root);
+
+  // 저장소에 단 1개의 기억만 존재하는 상태 (N = 1, df = 1)
+  const singleMemory = candidateFixture({
+    candidateId: 'webhook-signature-verification',
+    type: 'validation_pattern',
+    modelClass: 'domain_model',
+    scope: 'global',
+    primaryCategory: 'validation_patterns',
+    topic: 'Webhook signature verification',
+    title: '웹훅 서명 검증',
+    summary: '웹훅 서명 검증 시 HMAC-SHA256 알고리즘과 타임스탬프를 검증한다.',
+    rule: '웹훅 페이로드는 HMAC-SHA256 시그니처와 리플레이 공격 방지 타임스탬프를 검증한다.',
+    domains: ['security', 'webhook'],
+    tags: ['webhook', 'signature', 'hmac']
+  });
+
+  await extractMemoryCandidates(root, {
+    structuredMemoryCandidates: [singleMemory]
+  });
+
+  // 1) scoreMemoryDetailed에서 비음수 IDF에 의해 유효한 matchScore가 계산되는지 직접 검증
+  const scored = scoreMemoryDetailed(singleMemory, '웹훅 서명 검증해줘');
+  assert.ok(scored.matchScore >= 5, `matchScore should be >= 5 for small repo, got: ${scored.matchScore}`);
+
+  // 2) generatePreTaskBrief 및 generateContextPack에서 커트라인에 걸리지 않고 정상 검색되는지 검증
+  const brief = await generatePreTaskBrief(root, { task: '웹훅 서명 검증해줘', debug: true });
+  const context = await generateContextPack(root, { task: '웹훅 서명 검증해줘' });
+
+  assert.match(brief, /웹훅 서명 검증/u);
+  assert.match(context, /웹훅 서명 검증/u);
 });
 
 test('project memory is not crowded out by matching global memory limits', async () => {

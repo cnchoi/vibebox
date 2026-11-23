@@ -1213,6 +1213,7 @@ function defaultConfig(options = {}) {
     obsidianCompatible: true,
     maxContextItems: 8,
     maxContextChars: 6000,
+    minMatchScore: typeof options.minMatchScore === 'number' ? options.minMatchScore : 5,
     locale,
     memoryLanguage: outputLanguage,
     outputLanguage,
@@ -2303,7 +2304,7 @@ async function ensureConfigFields(root) {
   }
 
   const languageKeys = ['memoryLanguage', 'outputLanguage', 'wikiLanguage', 'reportLanguage', 'contextLanguage'];
-  const configKeys = ['maxContextItems', 'maxContextChars', 'memoryMode', 'curationMode', 'legacyReviewMode', 'quarantineOnConflict', 'autoActivateConfidence', 'obsidianCompatible', 'locale', ...languageKeys];
+  const configKeys = ['maxContextItems', 'maxContextChars', 'minMatchScore', 'memoryMode', 'curationMode', 'legacyReviewMode', 'quarantineOnConflict', 'autoActivateConfidence', 'obsidianCompatible', 'locale', ...languageKeys];
 
   for (const key of configKeys) {
     if (existing[key] === undefined) {
@@ -4068,7 +4069,7 @@ const HANZI_RUN_REGEX = /[\u4E00-\u9FFF\u3400-\u4DBF]+/gu;
 
 const KOREAN_JOSA_SUFFIXES = [
   '에서는', '으로는', '에게서', '에게는', '부터는', '까지는',
-  '에서', '으로', '에게', '부터', '까지', '처럼', '하고', '이나', '이란',
+  '에서', '으로', '에게', '부터', '까지', '처럼', '하고', '이나', '이란', '해줘',
   '은', '는', '이', '가', '을', '를', '에', '의', '로', '와', '과', '도', '만'
 ];
 
@@ -4891,7 +4892,49 @@ function conceptNameForTerm(term) {
     .join(' ');
 }
 
-function scoreMemoryDetailed(memory, task, config = {}) {
+export const BM25_K1 = 1.2;
+export const BM25_B = 0.75;
+export const BM25_SCALE = 18;
+
+export function computeCorpusStats(memories = []) {
+  const activeMemories = (memories || []).filter((m) => m && m.status === 'active');
+  const pool = activeMemories.length > 0 ? activeMemories : (memories || []).filter(Boolean);
+  const N = Math.max(1, pool.length);
+  const docTokensMap = new Map();
+  const df = new Map();
+  let totalTokens = 0;
+
+  for (const memory of pool) {
+    const tokens = memoryKeywords(memory);
+    if (memory.id) docTokensMap.set(memory.id, tokens);
+    totalTokens += tokens.length;
+    const uniqueTokens = new Set(tokens);
+    for (const token of uniqueTokens) {
+      df.set(token, (df.get(token) || 0) + 1);
+    }
+  }
+
+  const avgdl = pool.length > 0 ? Math.max(1, totalTokens / pool.length) : 1;
+  return {
+    N,
+    avgdl,
+    df,
+    docTokensMap
+  };
+}
+
+export function calculateBm25Score(token, memory, corpusStats, k1 = BM25_K1, b = BM25_B) {
+  if (!corpusStats || !token) return 0;
+  const N = Math.max(1, corpusStats.N || 1);
+  const dfVal = corpusStats.df?.get(token) || 1;
+  const idf = Math.log(1 + (N - dfVal + 0.5) / (dfVal + 0.5));
+  const docLen = corpusStats.docTokensMap?.get(memory?.id)?.length || memoryKeywords(memory || {}).length || 1;
+  const avgdl = Math.max(1, corpusStats.avgdl || 1);
+  const tfNorm = (1 * (k1 + 1)) / (1 + k1 * (1 - b + b * (docLen / avgdl)));
+  return BM25_SCALE * idf * tfNorm;
+}
+
+export function scoreMemoryDetailed(memory, task, config = {}) {
   const taskTokens = new Set(memoryKeywords({ summary: task, tags: [], domains: [], appliesTo: [] }));
   const memoryTokenSet = new Set(memoryKeywords(memory));
   let matchScore = 0;
@@ -4899,10 +4942,18 @@ function scoreMemoryDetailed(memory, task, config = {}) {
     + (TYPE_PRIORITY[memory.type] || 0)
     + (CONFIDENCE_PRIORITY[memory.confidence] || 0);
 
+  const corpusStats = config.corpusStats || {
+    N: 1,
+    avgdl: memoryKeywords(memory).length || 1,
+    df: new Map(),
+    docTokensMap: new Map()
+  };
+
   for (const token of taskTokens) {
     if (memoryTokenSet.has(token)) {
-      score += 12;
-      matchScore += 12;
+      const termScore = calculateBm25Score(token, memory, corpusStats);
+      score += termScore;
+      matchScore += termScore;
     }
   }
   const normalizedTopic = normalizeText(memory.topic);
@@ -4923,20 +4974,23 @@ function scoreMemoryDetailed(memory, task, config = {}) {
   if (memoryBelongsToCurrentProject(memory, config.projectIds || config.projectId)) score += 25;
   if (memory.scope === 'project') score += 16;
   if (memory.scope === 'global') score -= 6;
-  if (['avoid_rule', 'failure_memory', 'agent_failure_pattern'].includes(memory.type) && matchScore > 0) score += 35;
+  const minThreshold = typeof config.minMatchScore === 'number' ? config.minMatchScore : 5;
+  if (['avoid_rule', 'failure_memory', 'agent_failure_pattern'].includes(memory.type) && matchScore >= minThreshold) score += 35;
   if (config.situation && situationPreferredTypes(config.situation).includes(memory.type)) {
     score += 22;
-    if (PATTERN_TYPES.has(memory.type) && matchScore > 0) matchScore += 8;
   }
   score += Math.min(20, Number(memory.usageCount || 0) * 2);
   const ageMs = Date.now() - Date.parse(memory.updatedAt || memory.createdAt || nowIso());
   if (Number.isFinite(ageMs)) {
     score += Math.max(0, 8 - Math.floor(ageMs / 86_400_000));
   }
-  return { score, matchScore };
+  return {
+    score: Math.round(score * 100) / 100,
+    matchScore: Math.round(matchScore * 100) / 100
+  };
 }
 
-function scoreMemory(memory, task) {
+export function scoreMemory(memory, task) {
   return scoreMemoryDetailed(memory, task).score;
 }
 
@@ -5032,17 +5086,19 @@ function indexedVisibleMemories(memoryIndex = {}, keywordIndex = {}, relationInd
   return active.filter((memory) => candidateIds.has(memory.id) && isMemoryVisibleForProject(memory, project));
 }
 
-function selectRelevantMemories(memories, task, config) {
+export function selectRelevantMemories(memories, task, config = {}) {
   const maxItems = config.maxContextItems || 8;
   const situation = config.situation || detectSituation(task);
   const taskDomains = extractDomains(task);
   const taskTags = extractTags(task);
+  const corpusStats = config.corpusStats || computeCorpusStats(memories);
+  const minMatchScore = typeof config.minMatchScore === 'number' ? config.minMatchScore : 5;
   const scored = memories
     .filter((memory) => memory.status === 'active')
     .filter((memory) => matchesActiveCondition(memory, task))
     .filter((memory) => memoryMatchesTaskDomain(memory, { taskDomains, taskTags, task }, config.projectIds || config.projectId))
-    .map((memory) => ({ memory, ...scoreMemoryDetailed(memory, task, { ...config, situation }) }))
-    .filter((item) => item.matchScore > 0 || isGlobalUserBaselineMemory(item.memory))
+    .map((memory) => ({ memory, ...scoreMemoryDetailed(memory, task, { ...config, situation, corpusStats, minMatchScore }) }))
+    .filter((item) => item.matchScore >= minMatchScore || isGlobalUserBaselineMemory(item.memory))
     .sort((left, right) => right.score - left.score);
   const currentProject = scored.filter((item) => memoryBelongsToCurrentProject(item.memory, config.projectIds || config.projectId));
   const broader = scored.filter((item) => !memoryBelongsToCurrentProject(item.memory, config.projectIds || config.projectId));
@@ -5148,10 +5204,12 @@ export async function generateContextPack(root = process.cwd(), input = {}) {
   const project = await resolveProjectIdentityForRead(root);
   const task = input.task || input.text || '';
   const situation = detectSituation(task);
-  const retrievalConfig = { ...config, projectId: project.projectId, projectIds: [...projectIdentityKeys(project)], situation };
   const index = await loadJson(vibeboxPath(root, 'index/global-memory-index.json'), defaultMemoryIndex());
   const keywordIndex = await loadJson(vibeboxPath(root, 'index/keyword-index.json'), defaultKeywordIndex());
   const relationIndex = await loadJson(vibeboxPath(root, 'index/relation-index.json'), defaultRelationIndex());
+  const allActiveMemories = (index.memories || []).filter((m) => m.status === 'active');
+  const corpusStats = computeCorpusStats(allActiveMemories);
+  const retrievalConfig = { ...config, projectId: project.projectId, projectIds: [...projectIdentityKeys(project)], situation, corpusStats };
   const active = indexedVisibleMemories(index, keywordIndex, relationIndex, task, project, retrievalConfig);
   const scored = selectRelevantMemories(active, task, retrievalConfig);
 
@@ -5159,7 +5217,7 @@ export async function generateContextPack(root = process.cwd(), input = {}) {
   const conflicts = pendingIndex.candidates
     .filter((candidate) => candidate.status === 'pending' && !['no_conflict', 'duplicate'].includes(candidate.conflictStatus))
     .filter((candidate) => isMemoryVisibleForProject(candidate, project))
-    .filter((candidate) => scoreMemoryDetailed(candidate, task, retrievalConfig).matchScore > 0)
+    .filter((candidate) => scoreMemoryDetailed(candidate, task, retrievalConfig).matchScore >= (retrievalConfig.minMatchScore ?? 5))
     .slice(0, 4);
   const activeConflicts = findActiveMemoryConflicts(scored);
   const userSuccessCriteria = scored.filter((memory) => memory.memoryRole === 'user_success_criteria');
@@ -5276,17 +5334,19 @@ export async function generatePreTaskBrief(root = process.cwd(), input = {}) {
   const project = await resolveProjectIdentityForRead(root);
   const task = input.task || input.text || '';
   const situation = detectSituation(task);
-  const retrievalConfig = { ...config, projectId: project.projectId, projectIds: [...projectIdentityKeys(project)], situation };
   const index = await loadJson(vibeboxPath(root, 'index/global-memory-index.json'), defaultMemoryIndex());
   const keywordIndex = await loadJson(vibeboxPath(root, 'index/keyword-index.json'), defaultKeywordIndex());
   const relationIndex = await loadJson(vibeboxPath(root, 'index/relation-index.json'), defaultRelationIndex());
+  const allActiveMemories = (index.memories || []).filter((m) => m.status === 'active');
+  const corpusStats = computeCorpusStats(allActiveMemories);
+  const retrievalConfig = { ...config, projectId: project.projectId, projectIds: [...projectIdentityKeys(project)], situation, corpusStats };
   const relevant = selectRelevantMemories(indexedVisibleMemories(index, keywordIndex, relationIndex, task, project, retrievalConfig), task, retrievalConfig);
   const pendingIndex = await loadJson(vibeboxPath(root, 'index/pending-index.json'), defaultPendingIndex());
   const conflicts = [
     ...pendingIndex.candidates
       .filter((candidate) => candidate.status === 'pending' && !['no_conflict', 'duplicate'].includes(candidate.conflictStatus))
       .filter((candidate) => isMemoryVisibleForProject(candidate, project))
-      .filter((candidate) => scoreMemoryDetailed(candidate, task, retrievalConfig).matchScore > 0),
+      .filter((candidate) => scoreMemoryDetailed(candidate, task, retrievalConfig).matchScore >= (retrievalConfig.minMatchScore ?? 5)),
     ...findActiveMemoryConflicts(relevant)
   ].slice(0, 6);
   const broaderConflictIds = new Set(conflicts.map((conflict) => conflict.broaderMemoryId).filter(Boolean));
