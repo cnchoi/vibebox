@@ -126,6 +126,7 @@ test('Codex Stop hook outputs guidance with codex runtime attribution', async ()
   const hookPath = path.resolve('scripts/codex-vibebox-hook.mjs');
   const env = {
     ...process.env,
+    VIBEBOX_HOME: path.resolve(tmpdir(), `test-vibebox-stop-clean-${process.pid}-${Date.now()}`),
     CLAUDE_PLUGIN_ROOT: path.resolve('.')
   };
 
@@ -149,6 +150,7 @@ test('Claude hook skips pretask for casual non-actionable prompts', async () => 
   const hookPath = path.resolve('scripts/claude-vibebox-hook.mjs');
   const env = {
     ...process.env,
+    VIBEBOX_HOME: path.resolve(tmpdir(), `test-vibebox-stop-clean-${process.pid}-${Date.now()}`),
     CLAUDE_PLUGIN_ROOT: path.resolve('.')
   };
 
@@ -170,6 +172,7 @@ test('Antigravity PreInvocation hook deduplicates using (prompt, initialNumSteps
   const hookPath = path.resolve('scripts/antigravity-vibebox-hook.mjs');
   const env = {
     ...process.env,
+    VIBEBOX_HOME: path.resolve(tmpdir(), `test-vibebox-stop-clean-${process.pid}-${Date.now()}`),
     CLAUDE_PLUGIN_ROOT: path.resolve('.')
   };
 
@@ -266,6 +269,7 @@ test('Antigravity Stop hook outputs decision: continue and reason per engine spe
   const hookPath = path.resolve('scripts/antigravity-vibebox-hook.mjs');
   const env = {
     ...process.env,
+    VIBEBOX_HOME: path.resolve(tmpdir(), `test-vibebox-stop-clean-${process.pid}-${Date.now()}`),
     CLAUDE_PLUGIN_ROOT: path.resolve('.')
   };
 
@@ -318,6 +322,7 @@ test('Hermes hook entrypoint outputs guidance attributed to hermes', async () =>
   const hookPath = path.resolve('scripts/hermes-vibebox-hook.mjs');
   const env = {
     ...process.env,
+    VIBEBOX_HOME: path.resolve(tmpdir(), `test-vibebox-stop-clean-${process.pid}-${Date.now()}`),
     CLAUDE_PLUGIN_ROOT: path.resolve('.')
   };
 

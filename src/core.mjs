@@ -4890,7 +4890,7 @@ function scoreMemoryDetailed(memory, task, config = {}) {
   if (['avoid_rule', 'failure_memory', 'agent_failure_pattern'].includes(memory.type) && matchScore > 0) score += 35;
   if (config.situation && situationPreferredTypes(config.situation).includes(memory.type)) {
     score += 22;
-    if (PATTERN_TYPES.has(memory.type)) matchScore += 8;
+    if (PATTERN_TYPES.has(memory.type) && matchScore > 0) matchScore += 8;
   }
   score += Math.min(20, Number(memory.usageCount || 0) * 2);
   const ageMs = Date.now() - Date.parse(memory.updatedAt || memory.createdAt || nowIso());
@@ -5029,21 +5029,27 @@ function selectRelevantMemories(memories, task, config) {
     })
     .slice(0, maxItems)
     .map((item) => ({ ...item.memory, retrievalScore: item.score, retrievalMatchScore: item.matchScore, lastUsedAt: nowIso() }));
-  return includeSuccessFailurePairs(selected, scored.map((item) => item.memory), maxItems);
+  return includeSuccessFailurePairs(selected, memories, maxItems);
 }
 
 function memoryMatchesTaskDomain(memory, taskContext = {}, projectId = null) {
   if (memoryBelongsToCurrentProject(memory, projectId)) return true;
+  if (isGlobalUserBaselineMemory(memory)) return true;
   const taskDomains = taskContext.taskDomains || [];
   const taskTags = taskContext.taskTags || [];
   const task = taskContext.task || '';
-  if (taskDomains.length === 0) return true;
   const memoryDomains = memory.domains || [];
-  if (memoryDomains.length === 0) return true;
   const domainScoped = memory.scope === 'domain' || memory.modelClass === 'domain_model';
-  if (!domainScoped) return true;
-  if (setOverlap(memory.tags || [], taskTags) > 0) return true;
-  if (memory.topic && normalizeText(task).includes(normalizeText(memory.topic))) return true;
+
+  if (domainScoped) {
+    if (setOverlap(memory.tags || [], taskTags) > 0) return true;
+    if (memory.topic && normalizeText(task).includes(normalizeText(memory.topic))) return true;
+    if (memoryDomains.length > 0 && setOverlap(memoryDomains, taskDomains) > 0) return true;
+    return false;
+  }
+
+  if (taskDomains.length === 0) return true;
+  if (memoryDomains.length === 0) return true;
   return setOverlap(memoryDomains, taskDomains) > 0;
 }
 

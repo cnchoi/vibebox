@@ -1725,6 +1725,96 @@ test('pretask and context always include active global user-profile baselines wi
   assert.doesNotMatch(context, /automotive maintenance/);
 });
 
+test('pretask with domain-less instruction preserves user profile baseline and excludes unrelated domain technical patterns', async () => {
+  const root = await makeWorkspace();
+  await initVibeBox(root);
+
+  await extractFromAgent(root, {
+    structuredMemoryCandidates: [
+      candidateFixture({
+        candidateId: 'user-profile-baseline',
+        type: 'user_preference',
+        modelClass: 'user_model',
+        scope: 'global',
+        primaryCategory: 'user_preferences',
+        title: '초보자 쉬운 말 설명 선호',
+        summary: '사용자는 초보자도 이해할 수 있도록 쉬운 말로 설명하는 방식을 선호한다.',
+        rule: '전문 용어보다는 초보자가 이해하기 쉬운 비유와 평이한 단어로 설명한다.'
+      }),
+      candidateFixture({
+        candidateId: 'svg-dashboard-verification',
+        type: 'validation_pattern',
+        modelClass: 'domain_model',
+        scope: 'domain',
+        primaryCategory: 'validation_patterns',
+        topic: 'SVG dashboard playwright test',
+        title: 'SVG 대시보드 Playwright 검증',
+        summary: 'SVG 대시보드 렌더링 검증 시 Playwright 스크린샷 비교를 수행한다.',
+        rule: '대시보드 SVG 요소는 Playwright 시각 회귀 테스트로 검증한다.',
+        domains: ['dashboard', 'svg'],
+        tags: ['dashboard', 'svg', 'playwright']
+      }),
+      candidateFixture({
+        candidateId: 'markdown-table-mutation',
+        type: 'validation_pattern',
+        modelClass: 'domain_model',
+        scope: 'domain',
+        primaryCategory: 'validation_patterns',
+        topic: 'Bidirectional In-Place Markdown Table Mutation Verification',
+        title: '마크다운 테이블 수정 검증',
+        summary: '마크다운 테이블 서식 수정 시 파이프 정렬과 줄바꿈을 검증한다.',
+        rule: '마크다운 테이블은 렌더링된 너비와 열 정렬을 검증한다.',
+        domains: ['markdown'],
+        tags: ['markdown', 'table']
+      }),
+      candidateFixture({
+        candidateId: 'browser-stub-timing',
+        type: 'validation_pattern',
+        modelClass: 'domain_model',
+        scope: 'global',
+        primaryCategory: 'validation_patterns',
+        topic: 'BROWSER stub timing verification',
+        title: 'BROWSER 스텁으로 자동 브라우저 열기 시각 실측',
+        summary: 'BROWSER 환경변수에 스텁 스크립트를 지정하여 브라우저 호출 시각을 실측한다.',
+        rule: '자동 브라우저 열기 요구사항은 BROWSER 스텁으로 검증한다.',
+        domains: ['browser', 'tooling'],
+        tags: ['browser', 'stub']
+      })
+    ]
+  });
+
+  const task = '삭제해줘';
+  const brief = await generatePreTaskBrief(root, { task, debug: true });
+  const context = await generateContextPack(root, { task });
+
+  // 1. 사용자 기본 프로필(성향/언어)은 정상 포함
+  assert.match(brief, /초보자/);
+  assert.match(context, /초보자/);
+
+  // 2. 타 도메인의 검증 패턴(대시보드, 마크다운, 브라우저 등)은 확실하게 제외
+  assert.doesNotMatch(brief, /대시보드/);
+  assert.doesNotMatch(brief, /Playwright/i);
+  assert.doesNotMatch(brief, /마크다운/);
+  assert.doesNotMatch(brief, /BROWSER/i);
+  assert.doesNotMatch(context, /대시보드/);
+  assert.doesNotMatch(context, /Playwright/i);
+  assert.doesNotMatch(context, /마크다운/);
+  assert.doesNotMatch(context, /BROWSER/i);
+
+  // 3. 다른 도메인 없는 지시어('어떻게 해야 돼?')에서도 동일하게 격리
+  const brief2 = await generatePreTaskBrief(root, { task: '어떻게 해야 돼?', debug: true });
+  assert.match(brief2, /초보자/);
+  assert.doesNotMatch(brief2, /대시보드/);
+  assert.doesNotMatch(brief2, /Playwright/i);
+  assert.doesNotMatch(brief2, /마크다운/);
+  assert.doesNotMatch(brief2, /BROWSER/i);
+
+  // 4. 도메인이 일치하는 작업 지시어 입력 시에는 해당 검증 패턴이 정상 포함
+  const relevantBrief = await generatePreTaskBrief(root, { task: 'SVG 대시보드 검증해줘' });
+  assert.match(relevantBrief, /대시보드/);
+  assert.match(relevantBrief, /Playwright/i);
+});
+
 test('retrieval indexes localized display fields for user-language task matching', async () => {
   const root = await makeWorkspace();
   await initVibeBox(root, {
