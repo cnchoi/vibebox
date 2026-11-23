@@ -158,7 +158,7 @@ Codex App can read an installed plugin cache instead of your local checkout. A G
 Example cache placeholder (the version folder itself is the cache-busting part):
 
 ```text
-%USERPROFILE%\.codex\plugins\cache\boksajang\vibebox\0.2.5\
+%USERPROFILE%\.codex\plugins\cache\boksajang\vibebox\0.2.6\
 ```
 
 VibeBox does not delete or rewrite Codex App plugin cache files automatically.

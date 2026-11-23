@@ -184,7 +184,7 @@ Language conversion and semantic rebuild require an adapter-provided runtime mar
 
 ## Codex Cache Note
 
-Codex App can load an installed plugin cache instead of the repository checkout. A GitHub push alone does not refresh the installed cache. After local plugin source updates, run `git pull` or reinstall/update the plugin, then verify the cache under `%USERPROFILE%\.codex\plugins\cache\boksajang\vibebox\0.2.5\`. The installed package includes `bin/vibebox.mjs`, `src/`, lifecycle hooks, and the shared skill; VibeBox does not rewrite Codex App plugin cache files automatically. Run `npm run sync:plugin` and `npm run check:plugin` before reinstalling.
+Codex App can load an installed plugin cache instead of the repository checkout. A GitHub push alone does not refresh the installed cache. After local plugin source updates, run `git pull` or reinstall/update the plugin, then verify the cache under `%USERPROFILE%\.codex\plugins\cache\boksajang\vibebox\0.2.6\`. The installed package includes `bin/vibebox.mjs`, `src/`, lifecycle hooks, and the shared skill; VibeBox does not rewrite Codex App plugin cache files automatically. Run `npm run sync:plugin` and `npm run check:plugin` before reinstalling.
 
 ## Sensitive Data
 
