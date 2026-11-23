@@ -51,15 +51,20 @@ export function isActionableTask(prompt) {
   }
 
   // 1. Filter out pure conversational pleasantries, greetings, and acknowledgments
-  const casualPattern = /^(?:안녕(?:하세요|하십니까)?|하이|반가워|hello|hi|hey|good\s+morning|고마워(?:요)?|감사합니다|thank\s+you|thanks|수고했어|수고하세요|ok|okay|네|예|알겠어(?:요)?|확인|좋아(?:요)?)[.!?~^ ]*$/i;
+  const casualPattern = /^(?:안녕(?:하세요|하십니까)?|하이|반가워|hello|hi|hey|good\s+(?:morning|afternoon|evening)|고마워(?:요)?|감사합니다|thank\s+you|thanks|수고했어|수고하세요|ok|okay|네|예|알겠어(?:요)?|확인|좋아(?:요)?|你好|您好|哈喽|嗨|早上好|晚上好|下午好|谢谢(?:你)?|多谢|感谢|好的(?:呢|呀|吧|的|啦)?|明白|收到|辛苦了|行|可以|没问题)[.!?~^，。！\s]*$/i;
   if (casualPattern.test(trimmed)) {
     return false;
   }
 
   // 2. Filter out pure translation requests (unless containing explicit code snippets or file names)
   const hasCodeOrFilePath = /```|\.(?:m?[jt]sx?|py|rs|go|rb|json|ya?ml|toml|sql|html|css)\b|[\\/][\w.-]+\.[a-z0-9]+/i.test(trimmed);
-  const translationPattern = /^(?:(?:please\s+)?translate\b|can you translate\b|could you translate\b|번역(?:해\s*(?:줘|봐|주세요)|해|하기)?)/i;
-  if (!hasCodeOrFilePath && (translationPattern.test(trimmed) || /(?:문서|문장|텍스트|단락|paragraph|text|sentence)\s*번역/i.test(trimmed))) {
+  const translationPattern = /^(?:(?:please\s+)?translate\b|can you translate\b|could you translate\b|번역(?:해\s*(?:줘|봐|주세요)|해|하기)?|(?:(?:帮我|请|麻烦|能否|可以帮我)\s*)?翻译(?:一下|这段|这篇|这句|文本)?)/i;
+  if (!hasCodeOrFilePath && (
+    translationPattern.test(trimmed) ||
+    /(?:문서|문장|텍스트|단락|paragraph|text|sentence)\s*번역/i.test(trimmed) ||
+    /(?:文档|句子|文本|段落|这段话|这句话|这篇)\s*翻译/i.test(trimmed) ||
+    /^(?:帮我|请|麻烦)?把(?:这段|这句|文本|文档|这篇).*翻译(?:成|为)/i.test(trimmed)
+  )) {
     return false;
   }
 
@@ -95,6 +100,19 @@ export function isActionableTask(prompt) {
   const englishActionPattern = /\b(?:create|make|write|edit|modify|change|update|add|remove|delete|fix|implement|design|analyze|check|verify|validate|inspect|audit|review|run|test|build|deploy|investigate|refactor|optimize|benchmark|profile|trace|reproduce|debug|clean|format|sync|migrate|init|setup|configure|install)\b/i;
   const englishDevNounPattern = /\b(?:code|function|method|class|interface|type|test|spec|bug|issue|defect|feature|component|file|folder|dir|directory|hook|endpoint|api|script|repo|repository|workspace|package|plugin|module|runtime|dependency|dependencies|store|cache|vault|error|failure|logic|crash|syntax|schema|migration|build|pipeline|branch|commit|pr|diff|patch)\b/i;
   if (englishActionPattern.test(trimmed) && englishDevNounPattern.test(trimmed)) {
+    return true;
+  }
+
+  // 8. Chinese direct action imperatives, modification verbs, and defect/problem statements
+  const chineseActionPattern = /(?:修改|修复|改一下|改成|改完|调整|调成|调一下|添加|新增|删除|移除|实现|重构|调试|测试|优化|排查|解决|部署|配置|同步|报错|失败|崩溃|异常|无法|不生效|没生效)/u;
+  if (chineseActionPattern.test(trimmed)) {
+    return true;
+  }
+
+  // 9. Chinese technical/development nouns with action intent
+  const chineseTechNounPattern = /(?:代码|函数|方法|组件|页面|布局|样式|接口|文件|目录|脚本|仓库|分支|提交|记忆|钩子|插件|输入框|输出框|按钮|模块|数据库|依赖|逻辑|参数|变量|类|视图)/u;
+  const chineseActionIntentPattern = /(?:帮我|看看|看下|检查|分析|对比|评估|解释|怎么|为什么|排查|处理|确认|做|弄|搞|调|改)/u;
+  if (chineseTechNounPattern.test(trimmed) && chineseActionIntentPattern.test(trimmed)) {
     return true;
   }
 

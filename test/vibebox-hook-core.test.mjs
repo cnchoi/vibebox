@@ -58,12 +58,20 @@ test('isActionableTask filters casual greetings and acknowledgments', () => {
   assert.equal(isActionableTask('알겠어'), false);
   assert.equal(isActionableTask('네'), false);
   assert.equal(isActionableTask('확인'), false);
+  assert.equal(isActionableTask('你好'), false);
+  assert.equal(isActionableTask('谢谢'), false);
+  assert.equal(isActionableTask('好的'), false);
+  assert.equal(isActionableTask('明白'), false);
+  assert.equal(isActionableTask('收到'), false);
+  assert.equal(isActionableTask('辛苦了'), false);
 });
 
 test('isActionableTask filters non-coding questions and translation tasks', () => {
   assert.equal(isActionableTask('Translate this paragraph into Korean please.'), false);
   assert.equal(isActionableTask('이 문서 번역해줘'), false);
   assert.equal(isActionableTask('단락 번역해줘'), false);
+  assert.equal(isActionableTask('帮我翻译这段话'), false);
+  assert.equal(isActionableTask('翻译一下'), false);
   assert.equal(isActionableTask('What does the term store mean in retail?'), false);
   assert.equal(isActionableTask('Who is the president of France?'), false);
   assert.equal(isActionableTask('hello there, how are you doing today?'), false);
@@ -89,6 +97,30 @@ test('isActionableTask recognizes code indicators, verbs, and technical directiv
   assert.equal(isActionableTask('버튼 색깔 바꿔줘'), true);
   assert.equal(isActionableTask('로그인 안 돼 왜 그래?'), true);
   assert.equal(isActionableTask('새로운 기능 만들어줘'), true);
+
+  // Chinese actionable user requests
+  assert.equal(isActionableTask('帮我修改一下这个页面布局'), true);
+  assert.equal(isActionableTask('把输入框和输出框调成一样大'), true);
+  assert.equal(isActionableTask('这个接口报错了帮我排查一下'), true);
+});
+
+test('isActionableTask handles Chinese development directives, casual greetings, and translation requests', () => {
+  // Actionable development directives
+  assert.equal(isActionableTask('帮我修改一下这个页面布局'), true);
+  assert.equal(isActionableTask('把输入框和输出框调成一样大'), true);
+  assert.equal(isActionableTask('这个接口报错了帮我排查一下'), true);
+
+  // Casual greetings and acknowledgments
+  assert.equal(isActionableTask('你好'), false);
+  assert.equal(isActionableTask('谢谢'), false);
+  assert.equal(isActionableTask('好的'), false);
+  assert.equal(isActionableTask('明白'), false);
+  assert.equal(isActionableTask('收到'), false);
+  assert.equal(isActionableTask('辛苦了'), false);
+
+  // Pure translation requests
+  assert.equal(isActionableTask('帮我翻译这段话'), false);
+  assert.equal(isActionableTask('翻译一下'), false);
 });
 
 test('resolveAgentRuntime respects env, option, and host hints with precedence', () => {

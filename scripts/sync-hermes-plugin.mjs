@@ -13,6 +13,7 @@
  * then `/plugins/vibebox`.
  */
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +39,11 @@ async function readHash(file) {
 }
 
 async function main() {
+  if (!existsSync(hermesHome)) {
+    console.log(`[hermes-plugin] skipped — Hermes directory not found: ${hermesHome}`);
+    return;
+  }
+
   const drift = [];
   for (const name of FILES) {
     const sourceHash = await readHash(path.join(sourceDir, name));
