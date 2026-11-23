@@ -97,6 +97,9 @@ test('isActionableTask recognizes code indicators, verbs, and technical directiv
   assert.equal(isActionableTask('버튼 색깔 바꿔줘'), true);
   assert.equal(isActionableTask('로그인 안 돼 왜 그래?'), true);
   assert.equal(isActionableTask('새로운 기능 만들어줘'), true);
+  assert.equal(isActionableTask('제주도 투어 명단 정리해줘'), true);
+  assert.equal(isActionableTask('이번 주 일정 요약해줘'), true);
+  assert.equal(isActionableTask('오늘 날씨 어때'), false);
 
   // Chinese actionable user requests
   assert.equal(isActionableTask('帮我修改一下这个页面布局'), true);
@@ -109,6 +112,15 @@ test('isActionableTask handles Chinese development directives, casual greetings,
   assert.equal(isActionableTask('帮我修改一下这个页面布局'), true);
   assert.equal(isActionableTask('把输入框和输出框调成一样大'), true);
   assert.equal(isActionableTask('这个接口报错了帮我排查一下'), true);
+  // Work-verb directives that carry no code keywords (regression: 免税店流程 was skipped)
+  assert.equal(isActionableTask('给我整理免税店发票整理流程'), true);
+  assert.equal(isActionableTask('帮我汇总这个月的订单'), true);
+  assert.equal(isActionableTask('检查一下配置文件对不对'), true);
+  assert.equal(isActionableTask('把这批数据导出成表格'), true);
+  assert.equal(isActionableTask('核对一下名单和金额'), true);
+  // Still not actionable: small talk and definition questions
+  assert.equal(isActionableTask('今天天气怎么样'), false);
+  assert.equal(isActionableTask('这个是什么意思'), false);
 
   // Casual greetings and acknowledgments
   assert.equal(isActionableTask('你好'), false);

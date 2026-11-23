@@ -81,7 +81,7 @@ export function isActionableTask(prompt) {
   }
 
   // 5. Korean direct action imperatives and defect/problem statements
-  const koreanActionPattern = /(?:고쳐|수정|변경|바꿔|만들어|작성|구현|설계|추가|제거|삭제|리팩토링|빌드|배포|해결|최적화|패치|연동|디버깅|안\s*돼|안\s*되|왜\s*(?:안\s*돼|안\s*되|에러|오류|이래|그래|실패)|(?:버그|에러|오류|익셉션|크래시)\s*(?:가\s*)?(?:해결|수정|고쳐|잡아|발생|터져|있|생겼|나(?![가-힣])|나(?:[면고서도니야지]|는데|네요|니다))|테스트\s*(?:작성|추가|수정|실행|해|통과|실패|코드|케이스))/i;
+  const koreanActionPattern = /(?:고쳐|수정|변경|바꿔|만들어|작성|구현|설계|추가|제거|삭제|리팩토링|빌드|배포|해결|최적화|패치|연동|디버깅|정리|요약|취합|모아|대조|검토|비교|분석|추출|변환|입력|기록|등록|분류|집계|확인해|안\s*돼|안\s*되|왜\s*(?:안\s*돼|안\s*되|에러|오류|이래|그래|실패)|(?:버그|에러|오류|익셉션|크래시)\s*(?:가\s*)?(?:해결|수정|고쳐|잡아|발생|터져|있|생겼|나(?![가-힣])|나(?:[면고서도니야지]|는데|네요|니다))|테스트\s*(?:작성|추가|수정|실행|해|통과|실패|코드|케이스))/i;
   if (koreanActionPattern.test(trimmed)) {
     return true;
   }
@@ -104,7 +104,7 @@ export function isActionableTask(prompt) {
   }
 
   // 8. Chinese direct action imperatives, modification verbs, and defect/problem statements
-  const chineseActionPattern = /(?:修改|修复|改一下|改成|改完|调整|调成|调一下|添加|新增|删除|移除|实现|重构|调试|测试|优化|排查|解决|部署|配置|同步|报错|失败|崩溃|异常|无法|不生效|没生效)/u;
+  const chineseActionPattern = /(?:修改|修复|改一下|改成|改完|调整|调成|调一下|添加|新增|删除|移除|实现|重构|调试|测试|优化|排查|解决|部署|配置|同步|报错|失败|崩溃|异常|无法|不生效|没生效|整理|汇总|统计|归类|分类|核对|检查|查看|看一下|查找|搜索|列出|对比|评估|审查|收集|生成|导出|导入|填写|录入|更新|拉取|备份|清理|安装|启动|停止|运行|执行|发送|提交|上传|下载|合并|拆分|计算|校验|验证|重命名|移动|复制|搭建|梳理|排版|处理|制作)/u;
   if (chineseActionPattern.test(trimmed)) {
     return true;
   }
