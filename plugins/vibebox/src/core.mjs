@@ -4524,7 +4524,12 @@ async function writeManagedWikiPage(root, pageName, shell, managedContent) {
       return;
     }
     const pattern = new RegExp(`${escapeRegExp(MANAGED_BEGIN)}[\\s\\S]*?${escapeRegExp(MANAGED_END)}`, 'u');
-    await writeFile(filePath, `${existing.replace(pattern, block).replace(/\s*$/u, '')}\n`, 'utf8');
+    let updated = existing.replace(pattern, block).replace(/\s*$/u, '');
+    const shellFrontmatter = shell.match(/^---[\s\S]*?---\s*/u)?.[0];
+    if (shellFrontmatter && /^---[\s\S]*?---\s*/u.test(updated)) {
+      updated = updated.replace(/^---[\s\S]*?---\s*/u, shellFrontmatter);
+    }
+    await writeFile(filePath, `${updated}\n`, 'utf8');
     return;
   }
 
@@ -4761,6 +4766,8 @@ function yamlScalar(value) {
 
 function memoryNoteFrontmatter(memory, note, locale = 'en-US') {
   const domain = (memory.domains || [])[0] || '';
+  const createdAt = memory.createdAt || nowIso();
+  const updatedAt = memory.updatedAt || memory.createdAt || createdAt;
   return [
     '---',
     `title: ${yamlScalar(note.title)}`,
@@ -4777,6 +4784,8 @@ function memoryNoteFrontmatter(memory, note, locale = 'en-US') {
     `category: ${yamlScalar(localizedDocTitle(note.categoryDocKey, locale))}`,
     `primaryCategory: ${yamlScalar(localizedDocTitle(memoryCategoryDocKey(memory), locale))}`,
     `relatedCategories: ${JSON.stringify(memoryCategoryDocKeys(memory).map((docKey) => localizedDocTitle(docKey, locale)))}`,
+    `createdAt: ${yamlScalar(createdAt)}`,
+    `updatedAt: ${yamlScalar(updatedAt)}`,
     'vibebox: true',
     'obsidianCompatible: true',
     'memoryNote: true',
