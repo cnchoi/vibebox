@@ -6452,7 +6452,8 @@ export async function runDoctor(root = process.cwd()) {
     }
     const ids = new Set(memoryIndex.memories.map((memory) => memory.id));
     const activeMemories = memoryIndex.memories.filter((item) => item.status === 'active');
-    const notePathMap = buildMemoryNotePathMap(activeMemories, locale);
+    const format = resolveWikiLinkFormat(config, wikiRoot);
+    const notePathMap = buildMemoryNotePathMap(activeMemories, locale, format);
     for (const memory of memoryIndex.memories) {
       for (const relatedId of [...(memory.related || []), ...(memory.supersedes || [])]) {
         if (!ids.has(relatedId)) {
@@ -6478,7 +6479,7 @@ export async function runDoctor(root = process.cwd()) {
             warnings.push(`Memory note ${note.fileName} has missing category page ${categoryPage}.`);
           } else {
             const categoryText = await readFile(categoryPath, 'utf8');
-            if (!categoryText.includes(`[[${note.target}`)) {
+            if (!categoryText.includes(`[[${note.target}`) && !categoryText.includes(`[[${note.title}`)) {
               warnings.push(`Category page ${categoryPage} does not link to memory note ${note.target}.`);
             }
           }
@@ -6489,7 +6490,7 @@ export async function runDoctor(root = process.cwd()) {
               warnings.push(`Source project page projects/${sourceProjectId}.md is missing for memory ${memory.id}.`);
             } else {
               const projectText = await readFile(projectPath, 'utf8');
-              if (!projectText.includes(`[[${note.target}`)) {
+              if (!projectText.includes(`[[${note.target}`) && !projectText.includes(`[[${note.title}`)) {
                 warnings.push(`Project page projects/${sourceProjectId}.md does not link to source memory note ${note.target}.`);
               }
             }
@@ -6606,7 +6607,8 @@ export async function runDoctor(root = process.cwd()) {
       const managedText = text.includes(MANAGED_BEGIN)
         ? text.slice(text.indexOf(MANAGED_BEGIN), text.indexOf(MANAGED_END) + MANAGED_END.length)
         : text;
-      for (const match of managedText.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/gu)) {
+      const textWithoutCode = managedText.replace(/`[^`]+`/gu, '');
+      for (const match of textWithoutCode.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/gu)) {
         const target = match[1].trim();
         if (!target || target.startsWith('projects/')) continue;
         if (target.includes('/')) {
