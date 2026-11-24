@@ -461,7 +461,7 @@ export async function runCli(argv = process.argv.slice(2), root = process.cwd())
       if (flags.file) {
         text = await readFile(flags.file, 'utf8');
       }
-      if (!text) {
+      if (!text && !flags.event && !flags['last-event'] && !process.stdin.isTTY) {
         text = await readStdin();
       }
       const candidates = await extractMemoryCandidates(root, {
@@ -525,9 +525,23 @@ export async function runCli(argv = process.argv.slice(2), root = process.cwd())
       let fileText = '';
       if (flags['from-file']) {
         fileText = await readFile(flags['from-file'], 'utf8');
-      }
-      if (!fileText && !process.stdin.isTTY) {
-        fileText = await readStdin();
+      } else {
+        const hasExplicitInput = Boolean(
+          flags.request ||
+          flags.userRequest ||
+          flags.summary ||
+          flags.aiActionSummary ||
+          flags.candidates ||
+          flags['candidates-file'] ||
+          flags.candidatesFile ||
+          flags['structured-candidates'] ||
+          flags.structuredCandidates ||
+          flags['structured-candidates-file'] ||
+          flags.structuredCandidatesFile
+        );
+        if (!hasExplicitInput && !process.stdin.isTTY) {
+          fileText = await readStdin();
+        }
       }
       const fileFields = parseAfterTaskFile(fileText);
       const result = await afterTask(root, {

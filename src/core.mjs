@@ -3140,6 +3140,40 @@ function canApplyAgentReplacement(existing, candidate) {
   return true;
 }
 
+function isComplementaryMemory(existing, candidate) {
+  if (!existing || !candidate) return false;
+  if (existing.type === candidate.type) return false;
+  if (isNonDurableMemoryCandidate(candidate) || isNonDurableMemoryCandidate(existing)) return false;
+
+  const explicitReplacementIds = normalizeStringArray([
+    ...(candidate.replaces || []),
+    ...(candidate.supersedes || [])
+  ]);
+  if (explicitReplacementIds.includes(existing.id)) return false;
+
+  const candidateText = normalizeText([candidate.rule, candidate.summary, candidate.details, candidate.title].filter(Boolean).join(' '));
+  if (/^(replace|supersede)\b/i.test(candidate.rule || '') ||
+      /^(replace|supersede)\b/i.test(candidate.title || '') ||
+      /\b(replace|supersede)s?\s+(the|this|an?|with)\b/i.test(candidateText)) {
+    return false;
+  }
+
+  const isDecisionOrPreference = (t) => [
+    'user_preference',
+    'project_decision',
+    'technology_preference',
+    'tooling_preference',
+    'coding_style',
+    'design_preference'
+  ].includes(t);
+
+  if (isDecisionOrPreference(existing.type) && isDecisionOrPreference(candidate.type) && existing.topic === candidate.topic) {
+    return false;
+  }
+
+  return true;
+}
+
 export function classifyCandidateConflict(activeMemoryRecords = [], candidate) {
   const relatedMemories = activeMemoryRecords.filter((memory) => hasTargetOverlap(memory, candidate));
   if (relatedMemories.length === 0) {
@@ -3182,6 +3216,16 @@ export function classifyCandidateConflict(activeMemoryRecords = [], candidate) {
       return { status: 'supersedes', related, supersedes: explicitReplaceable, reason: 'Agent explicitly requested replacement of compatible active memory.' };
     }
     return { status: 'needs_user_review', related, supersedes: [], reason: 'Agent requested replacement outside the safe model, scope, domain, or project boundary.' };
+  }
+
+  const conflictingMemories = relatedMemories.filter((memory) => !isComplementaryMemory(memory, candidate));
+  if (conflictingMemories.length === 0) {
+    return {
+      status: 'no_conflict',
+      related,
+      supersedes: [],
+      reason: 'Candidate complements active memory of different type(s).'
+    };
   }
 
   if (candidate.confidence === 'low') {
@@ -3621,7 +3665,7 @@ async function approveMemoryUnlocked(root = process.cwd(), candidateId, options 
     const memoryIndex = await loadJson(vibeboxPath(root, 'index/global-memory-index.json'), defaultMemoryIndex());
     return memoryIndex.memories.find((memory) => memory.id === candidateId) || candidate;
   }
-  if (candidate.status !== 'pending') {
+  if (!['pending', 'quarantined'].includes(candidate.status)) {
     throw new Error(`Candidate is not pending: ${candidateId}`);
   }
   if (!isMemoryVisibleForProject(candidate, project)) {
@@ -3735,7 +3779,7 @@ async function rejectMemoryUnlocked(root = process.cwd(), candidateId, reason = 
   if (!candidate) {
     throw new Error(`Pending candidate not found: ${candidateId}`);
   }
-  if (candidate.status !== 'pending') {
+  if (!['pending', 'quarantined'].includes(candidate.status)) {
     throw new Error(`Candidate is not pending: ${candidateId}`);
   }
   if (!isMemoryVisibleForProject(candidate, project)) {
@@ -4209,6 +4253,26 @@ function wikiLinkTargetFromFileName(fileName) {
   return pageTitle(fileName);
 }
 
+function resolveWikiLinkFormat(config = {}, wikiRoot = '') {
+  if (config.wikiLinkFormat) return config.wikiLinkFormat;
+  if (wikiRoot) {
+    try {
+      let current = path.resolve(wikiRoot);
+      let parent = path.dirname(current);
+      while (parent && parent !== current) {
+        if (existsSync(path.join(parent, '.obsidian'))) {
+          return 'shortest';
+        }
+        current = parent;
+        parent = path.dirname(current);
+      }
+    } catch {
+      // ignore path errors
+    }
+  }
+  return 'relative';
+}
+
 function wikiLink(label) {
   const clean = String(label || '')
     .replace(/[[\]]/gu, '')
@@ -4236,10 +4300,17 @@ function wd(locale, key) {
   return t(locale, key);
 }
 
+function sanitizeObsidianHtmlTags(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/(?<!`)([a-zA-Z0-9_\-가-힣]*<[a-zA-Z0-9_\-가-힣]+>)(?!`)/gu, '`$1`')
+    .replace(/(?<!`)(#[a-zA-Z][a-zA-Z0-9_\-]*)(?!`)/gu, '`$1`');
+}
+
 function localizeWikiDisplayText(text, locale = 'en-US') {
   const value = stripVisibleMemoryIds(text);
   if (!value) return '';
-  return value.trim();
+  return sanitizeObsidianHtmlTags(value.trim());
 }
 
 function memoryDisplayLanguageMatches(memory, locale = 'en-US') {
@@ -4341,10 +4412,11 @@ function memoryNoteTitle(memory, locale = 'en-US') {
   return display.replace(/\.$/u, '');
 }
 
-function buildMemoryNotePathMap(memories, locale = 'en-US') {
+function buildMemoryNotePathMap(memories, locale = 'en-US', format = 'relative') {
   const noteMemories = memories.filter(shouldWriteMemoryNote);
   const counts = new Map();
   const paths = new Map();
+  paths.format = format;
   for (const memory of noteMemories) {
     const folder = memoryCategoryFolder(memory, locale);
     const baseTitle = safeWikiPageName(memoryNoteTitle(memory, locale));
@@ -4357,19 +4429,20 @@ function buildMemoryNotePathMap(memories, locale = 'en-US') {
       categoryFolder: folder,
       title,
       fileName: `${folder}/${title}.md`,
-      target: `${folder}/${title}`
+      target: format === 'shortest' ? title : `${folder}/${title}`
     });
   }
   return paths;
 }
 
 function memoryNoteInfo(memory, locale = 'en-US', notePathMap = null) {
+  const format = notePathMap?.format || 'relative';
   return notePathMap?.get(memory.id) || {
     categoryDocKey: memoryCategoryDocKey(memory),
     categoryFolder: memoryCategoryFolder(memory, locale),
     title: safeWikiPageName(memoryNoteTitle(memory, locale)),
     fileName: `${memoryCategoryFolder(memory, locale)}/${safeWikiPageName(memoryNoteTitle(memory, locale))}.md`,
-    target: `${memoryCategoryFolder(memory, locale)}/${safeWikiPageName(memoryNoteTitle(memory, locale))}`
+    target: format === 'shortest' ? safeWikiPageName(memoryNoteTitle(memory, locale)) : `${memoryCategoryFolder(memory, locale)}/${safeWikiPageName(memoryNoteTitle(memory, locale))}`
   };
 }
 
@@ -4378,11 +4451,12 @@ function memoryNoteFileName(memory, locale = 'en-US', notePathMap = null) {
 }
 
 function wikiLinkForMemory(memory, locale = 'en-US', alias = '', notePathMap = null) {
+  const format = notePathMap?.format || 'relative';
   if (notePathMap && !notePathMap.has(memory.id)) {
     return wikiLinkForDocKey(memoryCategoryDocKey(memory), locale, alias || memoryDisplayTitle(memory, locale));
   }
   const note = memoryNoteInfo(memory, locale, notePathMap);
-  const target = wikiLinkTargetFromFileName(note.fileName);
+  const target = format === 'shortest' ? note.title : wikiLinkTargetFromFileName(note.fileName);
   const cleanAlias = String(alias || note.title).replace(/[[\]]/gu, '').trim();
   return cleanAlias && cleanAlias !== target ? `[[${target}|${cleanAlias}]]` : `[[${target}]]`;
 }
@@ -4394,10 +4468,10 @@ async function rebuildWiki(root) {
   const active = memoryIndex.memories.filter((memory) => memory.status === 'active');
   const registry = await loadJson(vibeboxPath(root, 'registry/projects.json'), defaultRegistry());
   const projects = (registry.projects || []).filter(isRegistryProject);
-  const notePathMap = buildMemoryNotePathMap(active, locale);
-
   const wikiRoot = resolveWikiRoot(root, config);
   await assertSafeWikiRoot(wikiRoot);
+  const format = resolveWikiLinkFormat(config, wikiRoot);
+  const notePathMap = buildMemoryNotePathMap(active, locale, format);
 
   await saveJson(vibeboxPath(root, 'registry/wiki-docs.json'), defaultWikiDocRegistry(locale));
   await writeManagedWikiDoc(root, 'home', renderHomeShell(locale), renderHomeManaged(active, locale, notePathMap), locale);
@@ -4408,7 +4482,7 @@ async function rebuildWiki(root) {
     renderGlobalIndexManaged(active.filter((memory) => memory.scope === 'global'), locale, notePathMap),
     locale
   );
-  await writeManagedWikiDoc(root, 'project_index', renderProjectIndexShell(locale), renderProjectIndexManaged(projects, locale), locale);
+  await writeManagedWikiDoc(root, 'project_index', renderProjectIndexShell(locale), renderProjectIndexManaged(projects, locale, format), locale);
   for (const doc of WIKI_DOCS.filter((item) => !['home', 'global_index', 'project_index'].includes(item.docKey))) {
     const pageMemories = active.filter((memory) => (
       shouldWriteMemoryNote(memory)
@@ -4511,12 +4585,13 @@ function renderProjectIndexShell(locale = 'en-US') {
 ${wd(locale, 'backTo')} ${wikiLinkForDocKey('home', locale)}.`;
 }
 
-function renderProjectIndexManaged(projects, locale = 'en-US') {
+function renderProjectIndexManaged(projects, locale = 'en-US', format = 'relative') {
   if (!projects.length) return t(locale, 'none');
+  const targetFor = (pId) => (format === 'shortest' ? pId : `projects/${pId}`);
   return [
     `## ${t(locale, 'pageProjectIndex')}`,
     '',
-    ...projects.map((project) => `- [[projects/${project.projectId}|${project.projectName || project.projectId}]] (${project.projectId})`)
+    ...projects.map((project) => `- [[${targetFor(project.projectId)}|${project.projectName || project.projectId}]] (${project.projectId})`)
   ].join('\n');
 }
 
@@ -4765,7 +4840,7 @@ function renderMemoryNoteManaged(memory, allMemories, projectById, locale = 'en-
     '',
     `## ${wd(locale, 'sourceSection')}`,
     '',
-    sourceProject ? `- [[projects/${sourceProject.projectId}|${sourceProject.projectName || sourceProject.projectId}]]` : `- ${t(locale, 'none')}`,
+    sourceProject ? `- [[${(notePathMap?.format || 'relative') === 'shortest' ? sourceProject.projectId : `projects/${sourceProject.projectId}`}|${sourceProject.projectName || sourceProject.projectId}]]` : `- ${t(locale, 'none')}`,
     '',
     `## ${wd(locale, 'relatedCategories')}`,
     '',

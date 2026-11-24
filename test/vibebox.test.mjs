@@ -2966,6 +2966,116 @@ test('conflict resolver uses contract fields for duplicate, explicit exception, 
   }).status, 'needs_user_review');
 });
 
+test('classifyCandidateConflict treats different memory types sharing trilingual tags as complementary', () => {
+  const active = [{
+    id: 'mem_arch_popover',
+    type: 'architecture_rule',
+    scope: 'project',
+    topic: 'popover navigation',
+    title: '말풍선 팝오버 레이아웃',
+    rule: '양쪽 사이드 드로어를 말풍선 팝오버로 교체하고 4가지 전환 테마를 지원한다.',
+    summary: '양쪽 사이드 드로어 대신 말풍선 팝오버를 사용합니다.',
+    tags: ['말풍선팝오버', '气泡弹窗', 'speech-bubble', '드로어', 'drawer'],
+    domains: ['frontend', 'agent-dashboard'],
+    appliesTo: ['agent dashboard popover'],
+    confidence: 'high',
+    status: 'active'
+  }];
+
+  const avoidCandidate = {
+    type: 'avoid_rule',
+    scope: 'project',
+    topic: 'popover backdrop',
+    title: '말풍선 팝오버 백드롭 이벤트 주의',
+    rule: '말풍선 팝오버를 구현할 때 백드롭 mousedown 이벤트에서 닫히지 않도록 주의한다.',
+    summary: '말풍선 팝오버 구현 시 mousedown 이벤트 조기 종료를 방지합니다.',
+    tags: ['말풍선팝오버', '气泡弹窗', 'speech-bubble', '이벤트', 'event'],
+    domains: ['frontend', 'agent-dashboard'],
+    appliesTo: ['agent dashboard popover'],
+    confidence: 'high'
+  };
+
+  const result = classifyCandidateConflict(active, avoidCandidate);
+  assert.equal(result.status, 'no_conflict');
+  assert.deepEqual(result.supersedes, []);
+  assert.deepEqual(result.related, ['mem_arch_popover']);
+  assert.match(result.reason, /complements/i);
+
+  const sameTypeCandidate = {
+    ...avoidCandidate,
+    type: 'architecture_rule',
+    rule: '말풍선 팝오버 대신 플로팅 모달을 사용한다.'
+  };
+  assert.equal(classifyCandidateConflict(active, sameTypeCandidate).status, 'needs_user_review');
+});
+
+test('memories of different types with overlapping trilingual tags are complementary and both auto-curate to active', async () => {
+  const root = await makeWorkspace();
+  await initVibeBox(root);
+
+  const [archResult] = await extractMemoryCandidates(root, {
+    structuredMemoryCandidates: [candidateFixture({
+      memoryRole: 'ai_successful_approach',
+      type: 'architecture_rule',
+      modelClass: 'project_model',
+      modelSubClass: 'project_architecture',
+      scope: 'project',
+      primaryCategory: 'decision_patterns',
+      topic: 'popover navigation',
+      title: '말풍선 팝오버 레이아웃',
+      displayTitle: '말풍선 팝오버 레이아웃',
+      summary: '양쪽 사이드 드로어 대신 말풍선 팝오버를 사용합니다.',
+      displaySummary: '양쪽 사이드 드로어 대신 말풍선 팝오버를 사용합니다.',
+      rule: '양쪽 사이드 드로어를 말풍선 팝오버로 교체하고 4가지 전환 테마를 지원한다.',
+      displayRule: '양쪽 사이드 드로어를 말풍선 팝오버로 교체하고 4가지 전환 테마를 지원한다.',
+      tags: ['말풍선팝오버', '气泡弹窗', 'speech-bubble', '드로어', 'drawer'],
+      domains: ['frontend', 'agent-dashboard'],
+      appliesTo: ['agent dashboard popover'],
+      confidence: 'high'
+    })]
+  });
+  assert.equal(archResult.status, 'active');
+
+  const [avoidResult] = await extractMemoryCandidates(root, {
+    structuredMemoryCandidates: [candidateFixture({
+      memoryRole: 'ai_failure_memory',
+      type: 'avoid_rule',
+      modelClass: 'project_model',
+      modelSubClass: 'project_avoid_rule',
+      scope: 'project',
+      primaryCategory: 'global_avoid_rules',
+      topic: 'popover backdrop',
+      title: '말풍선 팝오버 백드롭 이벤트 주의',
+      displayTitle: '말풍선 팝오버 백드롭 이벤트 주의',
+      summary: '말풍선 팝오버 구현 시 mousedown 이벤트 조기 종료를 방지합니다.',
+      displaySummary: '말풍선 팝오버 구현 시 mousedown 이벤트 조기 종료를 방지합니다.',
+      rule: '말풍선 팝오버를 구현할 때 백드롭 mousedown 이벤트에서 닫히지 않도록 주의한다.',
+      displayRule: '말풍선 팝오버를 구현할 때 백드롭 mousedown 이벤트에서 닫히지 않도록 주의한다.',
+      tags: ['말풍선팝오버', '气泡弹窗', 'speech-bubble', '이벤트', 'event'],
+      domains: ['frontend', 'agent-dashboard'],
+      appliesTo: ['agent dashboard popover'],
+      confidence: 'high'
+    })]
+  });
+
+  assert.equal(avoidResult.status, 'active');
+  assert.equal(avoidResult.conflictStatus, 'no_conflict');
+
+  const memoryIndex = await loadJson(storePath(root, 'index', 'global-memory-index.json'));
+  const activeMemories = memoryIndex.memories.filter((m) => m.status === 'active');
+  assert.equal(activeMemories.length, 2);
+  const archMemory = activeMemories.find((m) => m.type === 'architecture_rule');
+  const avoidMemory = activeMemories.find((m) => m.type === 'avoid_rule');
+  assert.ok(archMemory);
+  assert.ok(avoidMemory);
+
+  const relationIndex = await loadJson(storePath(root, 'index', 'relation-index.json'));
+  const hasRelated = relationIndex.relations.some(
+    (r) => r.type === 'related' && ((r.from === archMemory.id && r.to === avoidMemory.id) || (r.from === avoidMemory.id && r.to === archMemory.id))
+  );
+  assert.ok(hasRelated, 'complementary memories should have a related link');
+});
+
 test('replacement is bounded by model, domain, project, and durable memory scope', () => {
   const base = {
     id: 'mem_base',
