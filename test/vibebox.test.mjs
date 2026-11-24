@@ -6688,8 +6688,8 @@ test('Step 6 acceptance: memory notes record which agent produced them', async (
   assert.ok(noteTexts.some((text) => /^agent: "unknown"$/mu.test(text)), 'unattributed notes render agent: "unknown"');
   const memoryNoteTexts = noteTexts.filter((text) => text.includes('memoryNote: true'));
   assert.ok(memoryNoteTexts.length > 0, 'must have rendered memory notes');
-  assert.ok(memoryNoteTexts.every((text) => /^createdAt: "\d{4}-\d{2}-\d{2}T/mu.test(text)), 'rendered memory notes must expose createdAt in frontmatter');
-  assert.ok(memoryNoteTexts.every((text) => /^updatedAt: "\d{4}-\d{2}-\d{2}T/mu.test(text)), 'rendered memory notes must expose updatedAt in frontmatter');
+  assert.ok(memoryNoteTexts.every((text) => /^createdAt: "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"/mu.test(text)), 'rendered memory notes must expose local createdAt in frontmatter');
+  assert.ok(memoryNoteTexts.every((text) => /^updatedAt: "\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}"/mu.test(text)), 'rendered memory notes must expose local updatedAt in frontmatter');
   assert.ok(!noteTexts.some((text) => /^agent: "hermes"$/mu.test(text) && /mirror-sync.*josa-index/u.test(text)));
 });
 

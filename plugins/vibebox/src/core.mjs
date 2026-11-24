@@ -483,6 +483,20 @@ export function nowIso() {
   return new Date().toISOString();
 }
 
+export function formatLocalTimestamp(dateInput) {
+  if (!dateInput) return '';
+  const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+  const pad = (n) => String(n).padStart(2, '0');
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const dt = pad(d.getDate());
+  const h = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  const s = pad(d.getSeconds());
+  return `${y}-${m}-${dt} ${h}:${mi}:${s}`;
+}
+
 function hashId(prefix, value) {
   const digest = createHash('sha256').update(value).digest('hex').slice(0, 16);
   return `${prefix}_${digest}`;
@@ -4766,8 +4780,8 @@ function yamlScalar(value) {
 
 function memoryNoteFrontmatter(memory, note, locale = 'en-US') {
   const domain = (memory.domains || [])[0] || '';
-  const createdAt = memory.createdAt || nowIso();
-  const updatedAt = memory.updatedAt || memory.createdAt || createdAt;
+  const createdAt = formatLocalTimestamp(memory.createdAt || nowIso());
+  const updatedAt = formatLocalTimestamp(memory.updatedAt || memory.createdAt || nowIso());
   return [
     '---',
     `title: ${yamlScalar(note.title)}`,
